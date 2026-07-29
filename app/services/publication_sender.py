@@ -16,9 +16,7 @@ async def send_publication(
 ) -> Message:
     if content_type == PublicationContentType.TEXT.value:
         if not text:
-            raise ValueError(
-                "У текстовой публикации отсутствует текст."
-            )
+            raise ValueError("У текстовой публикации отсутствует текст.")
 
         return await bot.send_message(
             chat_id=chat_id,
@@ -28,9 +26,7 @@ async def send_publication(
 
     if content_type == PublicationContentType.PHOTO.value:
         if not telegram_file_id:
-            raise ValueError(
-                "У публикации отсутствует file_id фотографии."
-            )
+            raise ValueError("У публикации отсутствует file_id фотографии.")
 
         return await bot.send_photo(
             chat_id=chat_id,
@@ -41,9 +37,7 @@ async def send_publication(
 
     if content_type == PublicationContentType.VIDEO.value:
         if not telegram_file_id:
-            raise ValueError(
-                "У публикации отсутствует file_id видео."
-            )
+            raise ValueError("У публикации отсутствует file_id видео.")
 
         return await bot.send_video(
             chat_id=chat_id,
@@ -53,6 +47,4 @@ async def send_publication(
             supports_streaming=True,
         )
 
-    raise ValueError(
-        f"Неизвестный тип публикации: {content_type}"
-    )
+    raise ValueError(f"Неизвестный тип публикации: {content_type}")

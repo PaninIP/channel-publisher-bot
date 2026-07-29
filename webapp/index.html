@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1"
+    >
+    <meta name="color-scheme" content="light dark">
+    <title>Выбор даты публикации</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            color-scheme: light dark;
+            font-family: -apple-system, BlinkMacSystemFont,
+                "Segoe UI", sans-serif;
+            --bg: var(--tg-theme-bg-color, #111318);
+            --card: var(--tg-theme-secondary-bg-color, #1c1f26);
+            --text: var(--tg-theme-text-color, #f5f7fb);
+            --hint: var(--tg-theme-hint-color, #9ca3af);
+            --button: var(--tg-theme-button-color, #2aabee);
+            --button-text:
+                var(--tg-theme-button-text-color, #ffffff);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            min-height: 100%;
+            margin: 0;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        main {
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 22px 18px 30px;
+        }
+
+        section {
+            width: min(100%, 520px);
+            padding: 24px;
+            border-radius: 24px;
+            background: var(--card);
+        }
+
+        h1 {
+            margin: 0 0 10px;
+            font-size: 30px;
+            line-height: 1.12;
+        }
+
+        p {
+            color: var(--hint);
+            line-height: 1.45;
+        }
+
+        label {
+            display: block;
+            margin: 26px 0 9px;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        input {
+            width: 100%;
+            min-height: 58px;
+            padding: 12px 14px;
+            border: 1px solid rgba(127, 127, 127, 0.32);
+            border-radius: 16px;
+            background: var(--bg);
+            color: var(--text);
+            font: inherit;
+            font-size: 18px;
+        }
+
+        .timezone {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            margin-top: 18px;
+            color: var(--hint);
+            font-size: 14px;
+        }
+
+        .timezone strong {
+            color: var(--text);
+        }
+
+        .error {
+            min-height: 22px;
+            margin-top: 16px;
+            color: #ff6b6b;
+            font-size: 14px;
+        }
+
+        button {
+            width: 100%;
+            min-height: 52px;
+            border: 0;
+            border-radius: 15px;
+            background: var(--button);
+            color: var(--button-text);
+            font: inherit;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <section>
+            <h1>Выберите дату и время</h1>
+
+            <p>
+                Нажмите на поле ниже. Телефон откроет
+                системный календарь и выбор времени.
+            </p>
+
+            <label for="schedule-at">
+                Дата и время публикации
+            </label>
+
+            <input
+                id="schedule-at"
+                type="datetime-local"
+                step="300"
+                required
+            >
+
+            <div class="timezone">
+                <span>Часовой пояс</span>
+                <strong id="timezone-name">—</strong>
+            </div>
+
+            <p id="error" class="error"></p>
+
+            <button id="submit" type="button">
+                Запланировать
+            </button>
+        </section>
+    </main>
+
+    <script>
+        (() => {
+            const tg = window.Telegram?.WebApp;
+            const params = new URLSearchParams(
+                window.location.search,
+            );
+            const input = document.getElementById(
+                "schedule-at",
+            );
+            const timezoneElement = document.getElementById(
+                "timezone-name",
+            );
+            const errorElement = document.getElementById(
+                "error",
+            );
+            const submitButton = document.getElementById(
+                "submit",
+            );
+
+            const timezone = (
+                params.get("timezone") || "Europe/Moscow"
+            ).trim();
+
+            const minimumLocal = (
+                params.get("min_local") || ""
+            ).trim();
+
+            timezoneElement.textContent = timezone;
+
+            if (minimumLocal) {
+                input.min = minimumLocal;
+                input.value = minimumLocal;
+            }
+
+            function isValid() {
+                if (!input.value) {
+                    errorElement.textContent =
+                        "Выберите дату и время.";
+                    return false;
+                }
+
+                if (
+                    minimumLocal
+                    && input.value < minimumLocal
+                ) {
+                    errorElement.textContent =
+                        "Выбранное время уже прошло.";
+                    return false;
+                }
+
+                errorElement.textContent = "";
+                return true;
+            }
+
+            function submit() {
+                if (!isValid()) {
+                    return;
+                }
+
+                const payload = JSON.stringify({
+                    action: "schedule_publication",
+                    scheduled_local: input.value,
+                    timezone,
+                });
+
+                if (!tg) {
+                    window.alert(payload);
+                    return;
+                }
+
+                tg.sendData(payload);
+                tg.close();
+            }
+
+            input.addEventListener("input", isValid);
+            submitButton.addEventListener("click", submit);
+
+            if (tg) {
+                tg.ready();
+                tg.expand();
+            }
+
+            isValid();
+        })();
+    </script>
+</body>
+</html>

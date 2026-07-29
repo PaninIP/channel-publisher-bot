@@ -7,8 +7,11 @@ requires-python = ">=3.12"
 dependencies = [
     "aiogram>=3.30.0",
     "aiosqlite>=0.22.1",
+    "fastapi>=0.141.0",
     "pydantic-settings>=2.14.2",
     "sqlalchemy>=2.0.51",
+    "tzdata>=2026.3",
+    "uvicorn[standard]>=0.52.0",
 ]
 
 [dependency-groups]

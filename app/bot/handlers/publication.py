@@ -36,7 +36,6 @@ from app.services.publication_sender import (
     send_publication,
 )
 
-
 router = Router(name=__name__)
 
 
@@ -131,16 +130,16 @@ def validate_content(
             return "Текст публикации не должен быть пустым."
 
         if len(text) > 4096:
-            return (
-                "Текст слишком длинный. "
-                "Максимальная длина — 4096 символов."
-            )
-
-    if content_type in {
-        PublicationContentType.PHOTO.value,
-        PublicationContentType.VIDEO.value,
-    }:
-        if text and len(text) > 1024:
+            return "Текст слишком длинный. Максимальная длина — 4096 символов."
+        if (
+            content_type
+            in {
+                PublicationContentType.PHOTO.value,
+                PublicationContentType.VIDEO.value,
+            }
+            and text
+            and len(text) > 1024
+        ):
             return (
                 "Подпись к фото или видео слишком длинная. "
                 "Максимальная длина — 1024 символа."
@@ -166,11 +165,7 @@ async def send_preview(
         )
         return
 
-    if (
-        content_type
-        == PublicationContentType.PHOTO.value
-        and telegram_file_id
-    ):
+    if content_type == PublicationContentType.PHOTO.value and telegram_file_id:
         await message.answer_photo(
             photo=telegram_file_id,
             caption=text or None,
@@ -179,11 +174,7 @@ async def send_preview(
         )
         return
 
-    if (
-        content_type
-        == PublicationContentType.VIDEO.value
-        and telegram_file_id
-    ):
+    if content_type == PublicationContentType.VIDEO.value and telegram_file_id:
         await message.answer_video(
             video=telegram_file_id,
             caption=text or None,
@@ -193,9 +184,7 @@ async def send_preview(
         )
         return
 
-    raise ValueError(
-        "Не удалось сформировать предпросмотр."
-    )
+    raise ValueError("Не удалось сформировать предпросмотр.")
 
 
 @router.message(F.text == "📝 Создать пост")
@@ -204,9 +193,7 @@ async def handle_create_post(
     state: FSMContext,
 ) -> None:
     if message.from_user is None:
-        await message.answer(
-            "Не удалось определить пользователя."
-        )
+        await message.answer("Не удалось определить пользователя.")
         return
 
     channels = await get_owner_channels(
@@ -304,10 +291,7 @@ async def handle_post_content(
         await state.clear()
 
         await message.answer(
-            text=(
-                "❌ Подключённые каналы не найдены.\n\n"
-                "Добавьте канал в настройках."
-            ),
+            text=("❌ Подключённые каналы не найдены.\n\nДобавьте канал в настройках."),
             reply_markup=get_main_menu(),
         )
         return
@@ -328,10 +312,7 @@ async def handle_post_content(
     )
 
     await message.answer(
-        text=(
-            "📢 <b>Выберите канал</b>\n\n"
-            "Куда нужно опубликовать этот пост?"
-        ),
+        text=("📢 <b>Выберите канал</b>\n\nКуда нужно опубликовать этот пост?"),
         reply_markup=get_post_channel_keyboard(
             channels,
         ),
@@ -382,22 +363,16 @@ async def handle_post_channel_selection(
 
     content_type = data.get("content_type")
     text = data.get("text")
-    telegram_file_id = data.get(
-        "telegram_file_id"
-    )
+    telegram_file_id = data.get("telegram_file_id")
 
     valid_content_types = {
-        content_type_item.value
-        for content_type_item in PublicationContentType
+        content_type_item.value for content_type_item in PublicationContentType
     }
 
     if (
         not isinstance(content_type, str)
         or content_type not in valid_content_types
-        or (
-            text is not None
-            and not isinstance(text, str)
-        )
+        or (text is not None and not isinstance(text, str))
         or (
             telegram_file_id is not None
             and not isinstance(
@@ -409,10 +384,7 @@ async def handle_post_channel_selection(
         await state.clear()
 
         await callback.message.answer(
-            text=(
-                "❌ Данные публикации повреждены.\n"
-                "Начните создание поста заново."
-            ),
+            text=("❌ Данные публикации повреждены.\nНачните создание поста заново."),
             reply_markup=get_main_menu(),
         )
 
@@ -420,18 +392,14 @@ async def handle_post_channel_selection(
         return
 
     async with SessionFactory() as session:
-        publication_repository = (
-            PublicationRepository(session)
-        )
+        publication_repository = PublicationRepository(session)
 
-        publication = (
-            await publication_repository.create_draft(
-                owner_telegram_id=callback.from_user.id,
-                channel_id=channel.id,
-                content_type=content_type,
-                text=text,
-                telegram_file_id=telegram_file_id,
-            )
+        publication = await publication_repository.create_draft(
+            owner_telegram_id=callback.from_user.id,
+            channel_id=channel.id,
+            content_type=content_type,
+            text=text,
+            telegram_file_id=telegram_file_id,
         )
 
     await state.update_data(
@@ -499,18 +467,13 @@ async def handle_post_publish(
     channel_id = data.get("channel_id")
     content_type = data.get("content_type")
     text = data.get("text")
-    telegram_file_id = data.get(
-        "telegram_file_id"
-    )
+    telegram_file_id = data.get("telegram_file_id")
 
     if (
         not isinstance(publication_id, int)
         or not isinstance(channel_id, int)
         or not isinstance(content_type, str)
-        or (
-            text is not None
-            and not isinstance(text, str)
-        )
+        or (text is not None and not isinstance(text, str))
         or (
             telegram_file_id is not None
             and not isinstance(
@@ -522,10 +485,7 @@ async def handle_post_publish(
         await state.clear()
 
         await callback.message.answer(
-            text=(
-                "❌ Данные публикации повреждены.\n"
-                "Начните создание поста заново."
-            ),
+            text=("❌ Данные публикации повреждены.\nНачните создание поста заново."),
             reply_markup=get_main_menu(),
         )
 
@@ -549,54 +509,39 @@ async def handle_post_publish(
         return
 
     async with SessionFactory() as session:
-        publication_repository = (
-            PublicationRepository(session)
-        )
+        publication_repository = PublicationRepository(session)
 
-        publication = (
-            await publication_repository.get_by_id(
-                publication_id=publication_id,
-                owner_telegram_id=callback.from_user.id,
-            )
+        publication = await publication_repository.get_by_id(
+            publication_id=publication_id,
+            owner_telegram_id=callback.from_user.id,
         )
 
         if publication is None:
             await state.clear()
 
             await callback.message.answer(
-                text=(
-                    "❌ Публикация не найдена.\n"
-                    "Начните создание поста заново."
-                ),
+                text=("❌ Публикация не найдена.\nНачните создание поста заново."),
                 reply_markup=get_main_menu(),
             )
 
             await callback.answer()
             return
 
-        if (
-            publication.status
-            == PublicationStatus.PUBLISHED.value
-        ):
+        if publication.status == PublicationStatus.PUBLISHED.value:
             await callback.answer(
                 text="Пост уже опубликован.",
                 show_alert=True,
             )
             return
 
-        if (
-            publication.status
-            == PublicationStatus.PUBLISHING.value
-        ):
+        if publication.status == PublicationStatus.PUBLISHING.value:
             await callback.answer(
                 text="Публикация уже выполняется.",
                 show_alert=True,
             )
             return
 
-        await publication_repository.mark_publishing(
-            publication
-        )
+        await publication_repository.mark_publishing(publication)
 
     try:
         published_message = await send_publication(
@@ -674,23 +619,17 @@ async def handle_post_publish(
         return
 
     async with SessionFactory() as session:
-        publication_repository = (
-            PublicationRepository(session)
-        )
+        publication_repository = PublicationRepository(session)
 
-        publication = (
-            await publication_repository.get_by_id(
-                publication_id=publication_id,
-                owner_telegram_id=callback.from_user.id,
-            )
+        publication = await publication_repository.get_by_id(
+            publication_id=publication_id,
+            owner_telegram_id=callback.from_user.id,
         )
 
         if publication is not None:
             await publication_repository.mark_published(
                 publication,
-                telegram_message_id=(
-                    published_message.message_id
-                ),
+                telegram_message_id=(published_message.message_id),
             )
 
     await state.clear()
@@ -709,16 +648,9 @@ async def handle_post_publish(
     )
 
     if channel.username:
-        post_url = (
-            f"https://t.me/{channel.username}/"
-            f"{published_message.message_id}"
-        )
+        post_url = f"https://t.me/{channel.username}/{published_message.message_id}"
 
-        result_text += (
-            f'\n\n<a href="{post_url}">'
-            "Открыть публикацию"
-            "</a>"
-        )
+        result_text += f'\n\n<a href="{post_url}">Открыть публикацию</a>'
 
     await callback.message.answer(
         text=result_text,
@@ -740,29 +672,18 @@ async def handle_create_post_cancel_callback(
 
     if isinstance(publication_id, int):
         async with SessionFactory() as session:
-            publication_repository = (
-                PublicationRepository(session)
-            )
+            publication_repository = PublicationRepository(session)
 
-            publication = (
-                await publication_repository.get_by_id(
-                    publication_id=publication_id,
-                    owner_telegram_id=(
-                        callback.from_user.id
-                    ),
-                )
+            publication = await publication_repository.get_by_id(
+                publication_id=publication_id,
+                owner_telegram_id=(callback.from_user.id),
             )
 
             if (
                 publication is not None
-                and publication.status
-                != PublicationStatus.PUBLISHED.value
+                and publication.status != PublicationStatus.PUBLISHED.value
             ):
-                await (
-                    publication_repository.mark_cancelled(
-                        publication
-                    )
-                )
+                await publication_repository.mark_cancelled(publication)
 
     await state.clear()
 

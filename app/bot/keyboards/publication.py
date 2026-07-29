@@ -22,9 +22,7 @@ def get_post_content_keyboard() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
-        input_field_placeholder=(
-            "Отправьте текст, фото или видео"
-        ),
+        input_field_placeholder=("Отправьте текст, фото или видео"),
     )
 
 
@@ -59,8 +57,14 @@ def get_post_confirmation_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Опубликовать",
+                    text="🚀 Опубликовать сейчас",
                     callback_data="post:publish",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🕒 Запланировать",
+                    callback_data="post:schedule",
                 ),
             ],
             [
@@ -70,4 +74,19 @@ def get_post_confirmation_keyboard() -> InlineKeyboardMarkup:
                 ),
             ],
         ],
+    )
+
+
+def get_schedule_time_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="❌ Отменить создание поста",
+                ),
+            ],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+        input_field_placeholder="Например: 29.07.2026 18:30",
     )
