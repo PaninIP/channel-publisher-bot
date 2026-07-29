@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     bot_token: SecretStr
     database_url: str = "sqlite+aiosqlite:///./data/app.db"
 
+    app_timezone: str = "Europe/Moscow"
+    publication_worker_interval_seconds: int = 10
+    mini_app_url: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

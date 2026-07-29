@@ -21,7 +21,6 @@ from app.database.repositories.channel_repository import (
 )
 from app.database.session import SessionFactory
 
-
 router = Router(name=__name__)
 
 
@@ -47,15 +46,10 @@ def format_channels(channels: list[Channel]) -> str:
         else:
             address = "Приватный канал"
 
-        lines.append(
-            f"{number}. 🟢 <b>{safe_title}</b>\n"
-            f"   {address}"
-        )
+        lines.append(f"{number}. 🟢 <b>{safe_title}</b>\n   {address}")
 
     lines.append("")
-    lines.append(
-        "🟢 Канал подключён и доступен для публикаций."
-    )
+    lines.append("🟢 Канал подключён и доступен для публикаций.")
 
     return "\n".join(lines)
 
@@ -167,9 +161,7 @@ async def handle_shared_channel(
         return
 
     if message.from_user is None:
-        await message.answer(
-            "Не удалось определить пользователя."
-        )
+        await message.answer("Не удалось определить пользователя.")
         return
 
     try:
@@ -217,9 +209,7 @@ async def handle_shared_channel(
         ChatMemberStatus.CREATOR,
     }
 
-    can_post_messages = bool(
-        getattr(bot_member, "can_post_messages", False)
-    )
+    can_post_messages = bool(getattr(bot_member, "can_post_messages", False))
 
     if not is_administrator or not can_post_messages:
         await message.answer(

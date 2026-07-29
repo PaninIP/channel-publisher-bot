@@ -9,6 +9,11 @@ from app.database.models import (
 )
 
 
+def utc_now_naive() -> datetime:
+    """?????????? ??????? UTC-????? ??? tzinfo ??? SQLite."""
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 class PublicationRepository:
     def __init__(
         self,
@@ -49,21 +54,77 @@ class PublicationRepository:
     ) -> Publication | None:
         statement = select(Publication).where(
             Publication.id == publication_id,
-            Publication.owner_telegram_id
-            == owner_telegram_id,
+            Publication.owner_telegram_id == owner_telegram_id,
         )
 
         result = await self.session.execute(statement)
 
         return result.scalar_one_or_none()
 
+    async def list_scheduled_by_owner(
+        self,
+        *,
+        owner_telegram_id: int,
+        limit: int = 20,
+    ) -> list[Publication]:
+        statement = (
+            select(Publication)
+            .where(
+                Publication.owner_telegram_id == owner_telegram_id,
+                Publication.status == PublicationStatus.SCHEDULED.value,
+                Publication.scheduled_at.is_not(None),
+            )
+            .order_by(
+                Publication.scheduled_at,
+                Publication.id,
+            )
+            .limit(limit)
+        )
+
+        result = await self.session.execute(statement)
+
+        return list(result.scalars().all())
+
+    async def list_due_scheduled(
+        self,
+        *,
+        limit: int = 20,
+    ) -> list[Publication]:
+        statement = (
+            select(Publication)
+            .where(
+                Publication.status == PublicationStatus.SCHEDULED.value,
+                Publication.scheduled_at.is_not(None),
+                Publication.scheduled_at <= utc_now_naive(),
+            )
+            .order_by(
+                Publication.scheduled_at,
+                Publication.id,
+            )
+            .limit(limit)
+        )
+
+        result = await self.session.execute(statement)
+
+        return list(result.scalars().all())
+
+    async def schedule(
+        self,
+        publication: Publication,
+        *,
+        scheduled_at_utc: datetime,
+    ) -> None:
+        publication.status = PublicationStatus.SCHEDULED.value
+        publication.scheduled_at = scheduled_at_utc
+        publication.error_text = None
+
+        await self.session.commit()
+
     async def mark_publishing(
         self,
         publication: Publication,
     ) -> None:
-        publication.status = (
-            PublicationStatus.PUBLISHING.value
-        )
+        publication.status = PublicationStatus.PUBLISHING.value
         publication.error_text = None
 
         await self.session.commit()
@@ -74,13 +135,9 @@ class PublicationRepository:
         *,
         telegram_message_id: int,
     ) -> None:
-        publication.status = (
-            PublicationStatus.PUBLISHED.value
-        )
-        publication.telegram_message_id = (
-            telegram_message_id
-        )
-        publication.published_at = datetime.now(UTC)
+        publication.status = PublicationStatus.PUBLISHED.value
+        publication.telegram_message_id = telegram_message_id
+        publication.published_at = utc_now_naive()
         publication.error_text = None
 
         await self.session.commit()
@@ -91,9 +148,7 @@ class PublicationRepository:
         *,
         error_text: str,
     ) -> None:
-        publication.status = (
-            PublicationStatus.FAILED.value
-        )
+        publication.status = PublicationStatus.FAILED.value
         publication.error_text = error_text[:2000]
 
         await self.session.commit()
@@ -102,8 +157,6 @@ class PublicationRepository:
         self,
         publication: Publication,
     ) -> None:
-        publication.status = (
-            PublicationStatus.CANCELLED.value
-        )
+        publication.status = PublicationStatus.CANCELLED.value
 
         await self.session.commit()

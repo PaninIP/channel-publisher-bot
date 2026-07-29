@@ -7,7 +7,6 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-
 CHANNEL_REQUEST_ID = 1001
 
 

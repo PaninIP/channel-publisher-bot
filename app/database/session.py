@@ -10,7 +10,6 @@ from app.config import get_settings
 from app.database.base import Base
 from app.database.models import Channel, Publication  # noqa: F401
 
-
 settings = get_settings()
 
 if settings.database_url.startswith("sqlite"):
@@ -37,3 +36,7 @@ async def init_database() -> None:
         await connection.run_sync(
             Base.metadata.create_all,
         )
+
+
+async def close_database() -> None:
+    await engine.dispose()
