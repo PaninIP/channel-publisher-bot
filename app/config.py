@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     app_timezone: str = "Europe/Moscow"
     publication_worker_interval_seconds: int = 10
     mini_app_url: str = ""
+    mini_app_auth_max_age_seconds: int = 86400
 
     model_config = SettingsConfigDict(
         env_file=".env",

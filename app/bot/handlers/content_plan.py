@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from html import escape
+from urllib.parse import urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiogram import F, Router
@@ -10,6 +11,7 @@ from app.bot.keyboards.content_plan import (
     get_back_to_plan_keyboard,
     get_cancel_confirmation_keyboard,
     get_content_plan_keyboard,
+    get_content_plan_web_app_keyboard,
     get_publication_actions_keyboard,
 )
 from app.config import get_settings
@@ -28,6 +30,31 @@ from app.database.repositories.publication_repository import (
 from app.database.session import SessionFactory
 
 router = Router(name=__name__)
+
+
+def build_content_plan_mini_app_url() -> str:
+    settings = get_settings()
+    parsed_url = urlsplit(settings.mini_app_url.strip())
+
+    if parsed_url.scheme != "https" or not parsed_url.netloc:
+        raise ValueError("MINI_APP_URL должен быть публичным HTTPS URL.")
+
+    query = urlencode(
+        {
+            "timezone": (settings.app_timezone.strip()),
+        }
+    )
+
+    return urlunsplit(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            "/plan",
+            query,
+            "",
+        )
+    )
+
 
 CONTENT_TYPE_LABELS = {
     PublicationContentType.TEXT.value: "?????",
@@ -224,32 +251,37 @@ def build_publication_details(
     )
 
 
-@router.message(F.text == "?? ???????-????")
+@router.message(F.text == "📅 Контент-план")
 async def handle_content_plan(
     message: Message,
 ) -> None:
     if message.from_user is None:
-        await message.answer("?? ??????? ?????????? ????????????.")
+        await message.answer("❌ Не удалось определить пользователя.")
         return
 
     try:
-        items = await list_scheduled_items(
-            owner_telegram_id=message.from_user.id,
-        )
-        text, buttons = build_plan_view(items)
-    except ZoneInfoNotFoundError:
+        mini_app_url = build_content_plan_mini_app_url()
+    except ValueError as error:
         await message.answer(
             text=(
-                "? ?? ??????? ??????? ???????-????: "
-                "? APP_TIMEZONE ?????? ??????????? "
-                "??????? ????."
+                "❌ <b>Не удалось открыть "
+                "контент-план</b>\n\n"
+                f"<code>{escape(str(error))}</code>"
             ),
         )
         return
 
     await message.answer(
-        text=text,
-        reply_markup=get_content_plan_keyboard(buttons),
+        text=(
+            "📅 <b>Контент-план</b>\n\n"
+            "Откройте календарь, чтобы увидеть "
+            "запланированные публикации."
+        ),
+        reply_markup=(
+            get_content_plan_web_app_keyboard(
+                mini_app_url=mini_app_url,
+            )
+        ),
     )
 
 
