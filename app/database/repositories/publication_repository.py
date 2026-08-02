@@ -148,6 +148,22 @@ class PublicationRepository:
 
         await self.session.commit()
 
+    async def update_scheduled(
+        self,
+        publication: Publication,
+        *,
+        channel_id: int,
+        text: str | None,
+        scheduled_at_utc: datetime,
+    ) -> None:
+        publication.channel_id = channel_id
+        publication.text = text
+        publication.scheduled_at = scheduled_at_utc
+        publication.error_text = None
+
+        await self.session.commit()
+        await self.session.refresh(publication)
+
     async def mark_publishing(
         self,
         publication: Publication,

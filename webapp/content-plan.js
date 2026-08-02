@@ -34,6 +34,41 @@
         "refresh-button",
     );
 
+    const editorOverlay = document.getElementById(
+        "editor-overlay",
+    );
+    const editorClose = document.getElementById(
+        "editor-close",
+    );
+    const editorForm = document.getElementById(
+        "editor-form",
+    );
+    const editorTitle = document.getElementById(
+        "editor-title",
+    );
+    const editorStatus = document.getElementById(
+        "editor-status",
+    );
+    const editorMedia = document.getElementById(
+        "editor-media",
+    );
+    const editorType = document.getElementById(
+        "editor-type",
+    );
+    const editorChannel = document.getElementById(
+        "editor-channel",
+    );
+    const editorScheduledAt =
+        document.getElementById(
+            "editor-scheduled-at",
+        );
+    const editorText = document.getElementById(
+        "editor-text",
+    );
+    const editorSave = document.getElementById(
+        "editor-save",
+    );
+
     const monthNames = [
         "Январь",
         "Февраль",
@@ -65,6 +100,9 @@
         items: [],
         timezone: "—",
         loading: false,
+        editorPublicationId: null,
+        editorLoading: false,
+        mediaObjectUrl: null,
     };
 
     function pad(value) {
@@ -106,6 +144,30 @@
     function setStatus(message, kind = "") {
         statusMessage.textContent = message;
         statusMessage.dataset.kind = kind;
+    }
+
+    function setEditorStatus(
+        message,
+        kind = "",
+    ) {
+        editorStatus.textContent = message;
+        editorStatus.dataset.kind = kind;
+    }
+
+    function getAuthHeaders(
+        contentType = false,
+    ) {
+        const headers = {
+            "X-Telegram-Init-Data":
+                telegram?.initData || "",
+        };
+
+        if (contentType) {
+            headers["Content-Type"] =
+                "application/json";
+        }
+
+        return headers;
     }
 
     function getItemsByDay() {
@@ -318,10 +380,15 @@
         for (const item of dayItems) {
             const article =
                 document.createElement(
-                    "article",
+                    "button",
                 );
+            article.type = "button";
             article.className =
                 "publication-card";
+            article.addEventListener(
+                "click",
+                () => openEditor(item.id),
+            );
 
             const time =
                 document.createElement("time");
@@ -358,10 +425,17 @@
                 "publication-preview";
             preview.textContent = item.preview;
 
+            const action =
+                document.createElement("span");
+            action.className =
+                "publication-action";
+            action.textContent = "Изменить ›";
+
             content.append(
                 channel,
                 meta,
                 preview,
+                action,
             );
             article.append(time, content);
             publicationList.append(article);
@@ -401,10 +475,7 @@
                     encodeURIComponent(monthKey)
                 }`,
                 {
-                    headers: {
-                        "X-Telegram-Init-Data":
-                            telegram.initData,
-                    },
+                    headers: getAuthHeaders(),
                 },
             );
 
@@ -449,6 +520,282 @@
         }
     }
 
+    function clearEditorMedia() {
+        if (state.mediaObjectUrl) {
+            URL.revokeObjectURL(
+                state.mediaObjectUrl
+            );
+            state.mediaObjectUrl = null;
+        }
+
+        editorMedia.replaceChildren();
+        editorMedia.hidden = true;
+    }
+
+    async function loadEditorMedia(
+        publicationId,
+        contentType,
+    ) {
+        clearEditorMedia();
+
+        try {
+            const response = await fetch(
+                `/api/publications/${
+                    publicationId
+                }/media`,
+                {
+                    headers: getAuthHeaders(),
+                },
+            );
+
+            if (!response.ok) {
+                const payload =
+                    await response.json();
+                throw new Error(
+                    payload.detail
+                    || (
+                        "Не удалось загрузить "
+                        + "вложение."
+                    ),
+                );
+            }
+
+            const blob = await response.blob();
+            const objectUrl =
+                URL.createObjectURL(blob);
+
+            state.mediaObjectUrl = objectUrl;
+
+            const media = (
+                contentType === "video"
+                    ? document.createElement(
+                        "video",
+                    )
+                    : document.createElement(
+                        "img",
+                    )
+            );
+
+            media.src = objectUrl;
+            media.className =
+                "editor-media-element";
+
+            if (contentType === "video") {
+                media.controls = true;
+                media.playsInline = true;
+                media.preload = "metadata";
+            } else {
+                media.alt = (
+                    "Вложение публикации"
+                );
+            }
+
+            editorMedia.append(media);
+            editorMedia.hidden = false;
+        } catch (error) {
+            setEditorStatus(
+                error instanceof Error
+                    ? error.message
+                    : (
+                        "Не удалось загрузить "
+                        + "вложение."
+                    ),
+                "error",
+            );
+        }
+    }
+
+    function closeEditor() {
+        editorOverlay.hidden = true;
+        document.body.classList.remove(
+            "editor-open",
+        );
+        state.editorPublicationId = null;
+        clearEditorMedia();
+        setEditorStatus("");
+    }
+
+    async function openEditor(
+        publicationId,
+    ) {
+        if (
+            state.editorLoading
+            || !telegram?.initData
+        ) {
+            return;
+        }
+
+        state.editorLoading = true;
+        state.editorPublicationId =
+            publicationId;
+        editorOverlay.hidden = false;
+        document.body.classList.add(
+            "editor-open",
+        );
+        editorSave.disabled = true;
+        editorTitle.textContent = (
+            `Публикация #${publicationId}`
+        );
+        setEditorStatus(
+            "Загружаем публикацию…",
+        );
+        clearEditorMedia();
+
+        try {
+            const response = await fetch(
+                `/api/publications/${
+                    publicationId
+                }`,
+                {
+                    headers: getAuthHeaders(),
+                },
+            );
+            const payload =
+                await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    payload.detail
+                    || (
+                        "Не удалось загрузить "
+                        + "публикацию."
+                    ),
+                );
+            }
+
+            editorType.value =
+                payload.content_type_label;
+            editorText.value =
+                payload.text || "";
+            editorScheduledAt.value =
+                payload.scheduled_local;
+
+            editorChannel.replaceChildren();
+
+            for (
+                const channel
+                of payload.channels
+            ) {
+                const option =
+                    document.createElement(
+                        "option",
+                    );
+                option.value = String(
+                    channel.id
+                );
+                option.textContent =
+                    channel.title;
+                option.selected = (
+                    channel.id
+                    === payload.channel_id
+                );
+                editorChannel.append(option);
+            }
+
+            setEditorStatus("");
+            editorSave.disabled = false;
+
+            if (payload.has_media) {
+                await loadEditorMedia(
+                    publicationId,
+                    payload.content_type,
+                );
+            }
+        } catch (error) {
+            setEditorStatus(
+                error instanceof Error
+                    ? error.message
+                    : (
+                        "Не удалось загрузить "
+                        + "публикацию."
+                    ),
+                "error",
+            );
+        } finally {
+            state.editorLoading = false;
+        }
+    }
+
+    async function saveEditor(event) {
+        event.preventDefault();
+
+        if (
+            state.editorLoading
+            || !state.editorPublicationId
+        ) {
+            return;
+        }
+
+        state.editorLoading = true;
+        editorSave.disabled = true;
+        setEditorStatus(
+            "Сохраняем изменения…",
+        );
+
+        try {
+            const response = await fetch(
+                `/api/publications/${
+                    state.editorPublicationId
+                }`,
+                {
+                    method: "PATCH",
+                    headers: getAuthHeaders(
+                        true,
+                    ),
+                    body: JSON.stringify({
+                        channel_id: Number(
+                            editorChannel.value
+                        ),
+                        text: editorText.value,
+                        scheduled_local: (
+                            editorScheduledAt
+                            .value
+                        ),
+                        timezone: state.timezone,
+                    }),
+                },
+            );
+
+            const payload =
+                await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    payload.detail
+                    || (
+                        "Не удалось сохранить "
+                        + "изменения."
+                    ),
+                );
+            }
+
+            setEditorStatus(
+                "Изменения сохранены.",
+                "success",
+            );
+
+            await loadMonth();
+
+            window.setTimeout(
+                closeEditor,
+                500,
+            );
+        } catch (error) {
+            setEditorStatus(
+                error instanceof Error
+                    ? error.message
+                    : (
+                        "Не удалось сохранить "
+                        + "изменения."
+                    ),
+                "error",
+            );
+            editorSave.disabled = false;
+        } finally {
+            state.editorLoading = false;
+        }
+    }
+
     function changeMonth(offset) {
         state.currentMonth = new Date(
             state.currentMonth.getFullYear(),
@@ -475,12 +822,38 @@
         loadMonth,
     );
 
+    editorClose.addEventListener(
+        "click",
+        closeEditor,
+    );
+
+    editorOverlay.addEventListener(
+        "click",
+        (event) => {
+            if (event.target === editorOverlay) {
+                closeEditor();
+            }
+        },
+    );
+
+    editorForm.addEventListener(
+        "submit",
+        saveEditor,
+    );
+
     if (telegram) {
         telegram.ready();
         telegram.expand();
         telegram.BackButton.show();
         telegram.BackButton.onClick(
-            () => telegram.close(),
+            () => {
+                if (!editorOverlay.hidden) {
+                    closeEditor();
+                    return;
+                }
+
+                telegram.close();
+            },
         );
     }
 
