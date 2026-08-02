@@ -127,5 +127,113 @@
             <strong id="timezone-name">—</strong>
         </footer>
     </main>
+
+    <div
+        id="editor-overlay"
+        class="editor-overlay"
+        hidden
+    >
+        <section
+            class="editor-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="editor-title"
+        >
+            <header class="editor-header">
+                <div>
+                    <p class="eyebrow">
+                        Редактирование публикации
+                    </p>
+                    <h2 id="editor-title">
+                        Публикация
+                    </h2>
+                </div>
+
+                <button
+                    id="editor-close"
+                    class="icon-button"
+                    type="button"
+                    aria-label="Закрыть редактор"
+                >
+                    ×
+                </button>
+            </header>
+
+            <div
+                id="editor-status"
+                class="status-message"
+                role="status"
+                aria-live="polite"
+            ></div>
+
+            <div
+                id="editor-media"
+                class="editor-media"
+                hidden
+            ></div>
+
+            <form id="editor-form">
+                <div class="field-group">
+                    <label for="editor-type">
+                        Тип публикации
+                    </label>
+                    <input
+                        id="editor-type"
+                        type="text"
+                        disabled
+                    >
+                </div>
+
+                <div class="field-group">
+                    <label for="editor-channel">
+                        Канал
+                    </label>
+                    <select
+                        id="editor-channel"
+                        required
+                    ></select>
+                </div>
+
+                <div class="field-group">
+                    <label for="editor-scheduled-at">
+                        Дата и время
+                    </label>
+                    <input
+                        id="editor-scheduled-at"
+                        type="datetime-local"
+                        step="300"
+                        required
+                    >
+                </div>
+
+                <div class="field-group">
+                    <label for="editor-text">
+                        Текст или подпись
+                    </label>
+                    <textarea
+                        id="editor-text"
+                        rows="10"
+                        maxlength="4096"
+                        placeholder="Введите текст публикации"
+                    ></textarea>
+                </div>
+
+                <p class="editor-note">
+                    На этом этапе вложение можно
+                    просмотреть. Замена и удаление
+                    медиа будут добавлены после
+                    подключения хранилища.
+                </p>
+
+                <button
+                    id="editor-save"
+                    class="primary-button"
+                    type="submit"
+                >
+                    Сохранить изменения
+                </button>
+            </form>
+        </section>
+    </div>
 </body>
 </html>
