@@ -85,6 +85,34 @@ class PublicationRepository:
 
         return list(result.scalars().all())
 
+    async def list_scheduled_for_period(
+        self,
+        *,
+        owner_telegram_id: int,
+        starts_at_utc: datetime,
+        ends_at_utc: datetime,
+        limit: int = 500,
+    ) -> list[Publication]:
+        statement = (
+            select(Publication)
+            .where(
+                Publication.owner_telegram_id == owner_telegram_id,
+                Publication.status == PublicationStatus.SCHEDULED.value,
+                Publication.scheduled_at.is_not(None),
+                Publication.scheduled_at >= starts_at_utc,
+                Publication.scheduled_at < ends_at_utc,
+            )
+            .order_by(
+                Publication.scheduled_at,
+                Publication.id,
+            )
+            .limit(limit)
+        )
+
+        result = await self.session.execute(statement)
+
+        return list(result.scalars().all())
+
     async def list_due_scheduled(
         self,
         *,

@@ -1,7 +1,29 @@
 from collections.abc import Sequence
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    WebAppInfo,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+
+def get_content_plan_web_app_keyboard(
+    *,
+    mini_app_url: str,
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📅 Открыть контент-план",
+                    web_app=WebAppInfo(
+                        url=mini_app_url,
+                    ),
+                ),
+            ],
+        ],
+    )
 
 
 def get_content_plan_keyboard(

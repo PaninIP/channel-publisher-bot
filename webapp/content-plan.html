@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1"
+    >
+    <meta name="color-scheme" content="light dark">
+    <title>Контент-план</title>
+
+    <link
+        rel="stylesheet"
+        href="/static/content-plan.css"
+    >
+
+    <script
+        src="https://telegram.org/js/telegram-web-app.js"
+    ></script>
+    <script
+        src="/static/content-plan.js"
+        defer
+    ></script>
+</head>
+<body>
+    <main class="page">
+        <header class="page-header">
+            <div>
+                <p class="eyebrow">
+                    Запланированные публикации
+                </p>
+                <h1>Контент-план</h1>
+            </div>
+
+            <button
+                id="refresh-button"
+                class="icon-button"
+                type="button"
+                aria-label="Обновить контент-план"
+                title="Обновить"
+            >
+                ↻
+            </button>
+        </header>
+
+        <section
+            class="calendar-panel"
+            aria-labelledby="month-title"
+        >
+            <div class="month-navigation">
+                <button
+                    id="previous-month"
+                    class="month-button"
+                    type="button"
+                    aria-label="Предыдущий месяц"
+                >
+                    ‹
+                </button>
+
+                <h2 id="month-title">—</h2>
+
+                <button
+                    id="next-month"
+                    class="month-button"
+                    type="button"
+                    aria-label="Следующий месяц"
+                >
+                    ›
+                </button>
+            </div>
+
+            <div
+                class="weekday-row"
+                aria-hidden="true"
+            >
+                <span>Пн</span>
+                <span>Вт</span>
+                <span>Ср</span>
+                <span>Чт</span>
+                <span>Пт</span>
+                <span>Сб</span>
+                <span>Вс</span>
+            </div>
+
+            <div
+                id="calendar-grid"
+                class="calendar-grid"
+                aria-label="Календарь публикаций"
+            ></div>
+        </section>
+
+        <section
+            class="day-panel"
+            aria-labelledby="selected-day-title"
+        >
+            <div class="day-heading">
+                <div>
+                    <p class="eyebrow">
+                        Выбранный день
+                    </p>
+                    <h2 id="selected-day-title">—</h2>
+                </div>
+
+                <span
+                    id="publication-count"
+                    class="count-badge"
+                >
+                    0
+                </span>
+            </div>
+
+            <div
+                id="status-message"
+                class="status-message"
+                role="status"
+                aria-live="polite"
+            ></div>
+
+            <div
+                id="publication-list"
+                class="publication-list"
+            ></div>
+        </section>
+
+        <footer class="page-footer">
+            <span>Часовой пояс</span>
+            <strong id="timezone-name">—</strong>
+        </footer>
+    </main>
+</body>
+</html>
