@@ -98,8 +98,8 @@ def test_schedule_is_converted_to_naive_utc() -> None:
 
     result = parse_scheduled_local(
         "2026-08-02T16:30",
-        timezone_name="Europe/Moscow",
-        configured_timezone_name=("Europe/Moscow"),
+        timezone_name="Europe/Samara",
+        timezone_offset_minutes=240,
         now=now,
     )
 
@@ -107,7 +107,7 @@ def test_schedule_is_converted_to_naive_utc() -> None:
         2026,
         8,
         2,
-        13,
+        12,
         30,
         tzinfo=UTC,
     ).replace(tzinfo=None)
@@ -123,6 +123,63 @@ def test_past_schedule_is_rejected() -> None:
         parse_scheduled_local(
             (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M"),
             timezone_name="UTC",
-            configured_timezone_name="UTC",
+            timezone_offset_minutes=0,
             now=now,
+        )
+
+
+def test_next_device_minute_is_allowed() -> None:
+    now = datetime(
+        2026,
+        8,
+        6,
+        17,
+        55,
+        40,
+        tzinfo=UTC,
+    )
+
+    result = parse_scheduled_local(
+        "2026-08-06T21:56",
+        timezone_name="Europe/Samara",
+        timezone_offset_minutes=240,
+        now=now,
+    )
+
+    assert result == datetime(2026, 8, 6, 17, 56)
+
+
+def test_current_device_minute_is_rejected() -> None:
+    now = datetime(
+        2026,
+        8,
+        6,
+        17,
+        55,
+        1,
+        tzinfo=UTC,
+    )
+
+    with pytest.raises(
+        ContentPlanEditorValidationError,
+        match="следующая минута",
+    ):
+        parse_scheduled_local(
+            "2026-08-06T21:55",
+            timezone_name="Europe/Samara",
+            timezone_offset_minutes=240,
+            now=now,
+        )
+
+
+def test_device_timezone_offset_mismatch_is_rejected() -> None:
+    with pytest.raises(
+        ContentPlanEditorValidationError,
+        match="Часовой пояс устройства изменился",
+    ):
+        parse_scheduled_local(
+            "2026-08-06T21:56",
+            timezone_name="Europe/Samara",
+            timezone_offset_minutes=180,
+            now=datetime(2026, 8, 6, 17, 0, tzinfo=UTC),
         )

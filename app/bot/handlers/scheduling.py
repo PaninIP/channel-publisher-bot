@@ -1,13 +1,7 @@
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from html import escape
-from urllib.parse import (
-    parse_qsl,
-    urlencode,
-    urlsplit,
-    urlunsplit,
-)
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from urllib.parse import urlsplit
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -28,57 +22,42 @@ from app.database.repositories.publication_repository import (
     PublicationRepository,
 )
 from app.database.session import SessionFactory
+from app.services.content_plan_editor import (
+    ContentPlanEditorValidationError,
+    parse_scheduled_local,
+)
 
 router = Router(name=__name__)
 
 
-def get_timezone_name() -> str:
-    return get_settings().app_timezone.strip()
-
-
-def get_application_timezone() -> ZoneInfo:
-    return ZoneInfo(get_timezone_name())
-
-
 def build_mini_app_url() -> str:
     settings = get_settings()
-    parsed_url = urlsplit(
-        settings.mini_app_url.strip(),
-    )
+    mini_app_url = settings.mini_app_url.strip()
+    parsed_url = urlsplit(mini_app_url)
 
     if parsed_url.scheme != "https" or not parsed_url.netloc:
         raise ValueError("MINI_APP_URL должен быть публичным HTTPS URL.")
 
-    timezone = get_application_timezone()
-    minimum_datetime = (datetime.now(timezone) + timedelta(minutes=2)).replace(
-        second=0,
-        microsecond=0,
-    )
+    return mini_app_url
 
-    query_items = dict(
-        parse_qsl(
-            parsed_url.query,
-            keep_blank_values=True,
-        )
-    )
-    query_items.update(
-        {
-            "timezone": get_timezone_name(),
-            "min_local": minimum_datetime.strftime(
-                "%Y-%m-%dT%H:%M",
-            ),
-        }
-    )
 
-    return urlunsplit(
-        (
-            parsed_url.scheme,
-            parsed_url.netloc,
-            parsed_url.path or "/",
-            urlencode(query_items),
-            parsed_url.fragment,
-        )
-    )
+def format_timezone_label(
+    timezone_name: str,
+    timezone_offset_minutes: int | None,
+) -> str:
+    normalized_name = timezone_name.strip()
+
+    if timezone_offset_minutes is None:
+        return normalized_name or "Часовой пояс устройства"
+
+    sign = "+" if timezone_offset_minutes >= 0 else "-"
+    absolute_minutes = abs(timezone_offset_minutes)
+    hours, minutes = divmod(absolute_minutes, 60)
+    offset = f"UTC{sign}{hours:02d}:{minutes:02d}"
+    if normalized_name:
+        return f"{normalized_name} ({offset})"
+
+    return offset
 
 
 async def cancel_publication_from_state(
@@ -133,7 +112,7 @@ async def handle_schedule_selection(
 
     try:
         mini_app_url = build_mini_app_url()
-    except (ValueError, ZoneInfoNotFoundError) as error:
+    except ValueError as error:
         await callback.answer(
             text="Mini App пока не настроен.",
             show_alert=True,
@@ -142,8 +121,7 @@ async def handle_schedule_selection(
             text=(
                 "❌ <b>Не удалось открыть календарь</b>\n\n"
                 f"<code>{escape(str(error))}</code>\n\n"
-                "Проверьте MINI_APP_URL и APP_TIMEZONE "
-                "в файле .env."
+                "Проверьте MINI_APP_URL в файле .env."
             ),
             reply_markup=get_main_menu(),
         )
@@ -162,8 +140,8 @@ async def handle_schedule_selection(
             "📅 <b>Выберите дату и время</b>\n\n"
             "Нажмите кнопку ниже. Откроется "
             "системный календарь телефона.\n\n"
-            f"Часовой пояс: "
-            f"<code>{escape(get_timezone_name())}</code>"
+            "Часовой пояс определяется автоматически "
+            "по настройкам устройства."
         ),
         reply_markup=get_schedule_web_app_keyboard(
             mini_app_url=mini_app_url,
@@ -227,11 +205,17 @@ async def handle_schedule_web_app_data(
     action = payload.get("action")
     scheduled_local = payload.get("scheduled_local")
     timezone_name = payload.get("timezone")
+    timezone_offset_minutes = payload.get("timezone_offset_minutes")
 
     if (
         action != "schedule_publication"
         or not isinstance(scheduled_local, str)
         or not isinstance(timezone_name, str)
+        or isinstance(timezone_offset_minutes, bool)
+        or (
+            timezone_offset_minutes is not None
+            and not isinstance(timezone_offset_minutes, int)
+        )
     ):
         await message.answer(
             text="❌ Mini App передал неполные данные.",
@@ -239,48 +223,26 @@ async def handle_schedule_web_app_data(
         )
         return
 
-    configured_timezone_name = get_timezone_name()
-
-    if timezone_name.strip() != configured_timezone_name:
-        await message.answer(
-            text=("❌ Часовой пояс Mini App не совпадает с настройками бота."),
-            reply_markup=ReplyKeyboardRemove(),
-        )
-        return
-
     try:
-        timezone = get_application_timezone()
-        selected_naive = datetime.fromisoformat(
+        scheduled_utc = parse_scheduled_local(
             scheduled_local,
+            timezone_name=timezone_name,
+            timezone_offset_minutes=timezone_offset_minutes,
         )
-
-        if selected_naive.tzinfo is not None:
-            selected_naive = selected_naive.replace(
-                tzinfo=None,
-            )
-
-        selected_local = selected_naive.replace(
-            tzinfo=timezone,
-        )
-    except (ValueError, ZoneInfoNotFoundError):
+        selected_local = datetime.fromisoformat(scheduled_local)
+    except ContentPlanEditorValidationError as error:
         await message.answer(
-            text="❌ Не удалось распознать дату и время.",
-            reply_markup=ReplyKeyboardRemove(),
-        )
-        return
-
-    if selected_local <= (datetime.now(timezone) + timedelta(minutes=1)):
-        await message.answer(
-            text=(
-                "❌ Выбранное время уже прошло.\n"
-                "Откройте календарь и выберите "
-                "более позднее время."
-            ),
+            text=f"❌ {escape(str(error))}",
             reply_markup=get_schedule_web_app_keyboard(
                 mini_app_url=build_mini_app_url(),
             ),
         )
         return
+
+    timezone_label = format_timezone_label(
+        timezone_name,
+        timezone_offset_minutes,
+    )
 
     data = await state.get_data()
     publication_id = data.get("publication_id")
@@ -292,8 +254,6 @@ async def handle_schedule_web_app_data(
             reply_markup=get_main_menu(),
         )
         return
-
-    scheduled_utc = selected_local.astimezone(UTC).replace(tzinfo=None)
 
     async with SessionFactory() as session:
         repository = PublicationRepository(session)
@@ -336,8 +296,8 @@ async def handle_schedule_web_app_data(
             f"<b>{selected_local:%d.%m.%Y}</b>\n"
             f"Время: "
             f"<b>{selected_local:%H:%M}</b>\n"
-            f"Часовой пояс: "
-            f"<code>{escape(configured_timezone_name)}</code>"
+            f"Часовой пояс устройства: "
+            f"<code>{escape(timezone_label)}</code>"
         ),
         reply_markup=get_main_menu(),
     )
