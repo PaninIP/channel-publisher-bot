@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import (
 from app.config import get_settings
 from app.database.base import Base
 from app.database.migrations import apply_sqlite_migrations
-from app.database.models import Channel, Publication  # noqa: F401
+from app.database.models import (  # noqa: F401
+    Channel,
+    Publication,
+    PublicationVersion,
+)
 
 settings = get_settings()
 

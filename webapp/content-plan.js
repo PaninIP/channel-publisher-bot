@@ -62,8 +62,32 @@
         document.getElementById(
             "editor-scheduled-at",
         );
-    const editorText = document.getElementById(
-        "editor-text",
+    const editorRichText = document.getElementById(
+        "editor-rich-text",
+    );
+    const editorToolbar = document.getElementById(
+        "editor-toolbar",
+    );
+    const editorPreview = document.getElementById(
+        "editor-preview",
+    );
+    const editorCharacterCount = document.getElementById(
+        "editor-character-count",
+    );
+    const editorVersion = document.getElementById(
+        "editor-version",
+    );
+    const editorDirty = document.getElementById(
+        "editor-dirty",
+    );
+    const editorHistoryToggle = document.getElementById(
+        "editor-history-toggle",
+    );
+    const editorHistory = document.getElementById(
+        "editor-history",
+    );
+    const editorHistoryList = document.getElementById(
+        "editor-history-list",
     );
     const editorSave = document.getElementById(
         "editor-save",
@@ -108,8 +132,20 @@
         loading: false,
         editorPublicationId: null,
         editorLoading: false,
+        editorVersion: 1,
+        editorDirty: false,
+        editorContentType: "text",
+        historyLoading: false,
         mediaObjectUrl: null,
     };
+
+    const richEditor = new window.RichTelegramEditor({
+        root: editorRichText,
+        preview: editorPreview,
+        counter: editorCharacterCount,
+        toolbar: editorToolbar,
+        onChange: () => setEditorDirty(true),
+    });
 
     function pad(value) {
         return String(value).padStart(2, "0");
@@ -593,6 +629,190 @@
         }
     }
 
+    function setEditorDirty(isDirty) {
+        state.editorDirty = isDirty;
+        editorDirty.hidden = !isDirty;
+
+        if (!telegram) {
+            return;
+        }
+
+        if (isDirty) {
+            telegram.enableClosingConfirmation?.();
+        } else {
+            telegram.disableClosingConfirmation?.();
+        }
+    }
+
+    function confirmDiscardChanges(callback) {
+        if (!state.editorDirty) {
+            callback();
+            return;
+        }
+
+        const message = (
+            "Есть несохранённые изменения. Закрыть редактор?"
+        );
+
+        if (telegram?.showConfirm) {
+            telegram.showConfirm(message, (confirmed) => {
+                if (confirmed) {
+                    callback();
+                }
+            });
+            return;
+        }
+
+        if (window.confirm(message)) {
+            callback();
+        }
+    }
+
+    function formatVersionDate(value) {
+        if (!value) {
+            return "";
+        }
+
+        const parsed = new Date(value);
+
+        if (Number.isNaN(parsed.getTime())) {
+            return value;
+        }
+
+        return new Intl.DateTimeFormat("ru-RU", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+        }).format(parsed);
+    }
+
+    function applyHistoricalVersion(item) {
+        richEditor.setDocument(
+            item.text || "",
+            item.text_entities || [],
+        );
+
+        const option = [...editorChannel.options].find(
+            (candidate) => Number(candidate.value) === Number(item.channel_id),
+        );
+
+        if (option) {
+            editorChannel.value = option.value;
+        }
+
+        const minimum = refreshEditorMinimum();
+
+        if (item.scheduled_local) {
+            editorScheduledAt.value = (
+                item.scheduled_local >= minimum
+                    ? item.scheduled_local
+                    : minimum
+            );
+        }
+
+        editorHistory.hidden = true;
+        setEditorDirty(true);
+        setEditorStatus(
+            `Версия ${item.version} загружена. Нажмите «Сохранить изменения».`,
+            "success",
+        );
+    }
+
+    function renderVersionHistory(items) {
+        editorHistoryList.replaceChildren();
+
+        if (!items.length) {
+            const empty = document.createElement("p");
+            empty.className = "empty-state";
+            empty.textContent = "История пока пуста.";
+            editorHistoryList.append(empty);
+            return;
+        }
+
+        for (const item of items) {
+            const card = document.createElement("div");
+            card.className = "history-item";
+
+            const content = document.createElement("div");
+            content.className = "history-item-content";
+
+            const title = document.createElement("strong");
+            title.textContent = (
+                item.is_current
+                    ? `Версия ${item.version} · текущая`
+                    : `Версия ${item.version}`
+            );
+
+            const meta = document.createElement("span");
+            meta.className = "history-item-meta";
+            meta.textContent = formatVersionDate(item.created_at);
+
+            const preview = document.createElement("p");
+            preview.className = "history-item-preview";
+            preview.textContent = (
+                (item.text || "Без текста")
+                    .replace(/\s+/g, " ")
+                    .slice(0, 140)
+            );
+
+            content.append(title, meta, preview);
+            card.append(content);
+
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "history-load-button";
+            button.textContent = item.is_current ? "Текущая" : "Загрузить";
+            button.disabled = item.is_current;
+
+            if (!item.is_current) {
+                button.addEventListener("click", () => {
+                    applyHistoricalVersion(item);
+                });
+            }
+
+            card.append(button);
+            editorHistoryList.append(card);
+        }
+    }
+
+    async function loadVersionHistory() {
+        if (
+            state.historyLoading
+            || !state.editorPublicationId
+        ) {
+            return;
+        }
+
+        state.historyLoading = true;
+        editorHistoryList.textContent = "Загружаем историю…";
+
+        try {
+            const response = await fetch(
+                `/api/publications/${state.editorPublicationId}/versions`
+                + `?timezone=${encodeURIComponent(state.timezone)}`
+                + `&timezone_offset_minutes=${getTimezoneOffsetMinutes(new Date())}`,
+                { headers: getAuthHeaders() },
+            );
+            const payload = await response.json();
+
+            if (!response.ok) {
+                throw new Error(payload.detail || "Не удалось загрузить историю.");
+            }
+
+            renderVersionHistory(payload.items || []);
+        } catch (error) {
+            editorHistoryList.textContent = (
+                error instanceof Error
+                    ? error.message
+                    : "Не удалось загрузить историю."
+            );
+        } finally {
+            state.historyLoading = false;
+        }
+    }
+
     function clearEditorMedia() {
         if (state.mediaObjectUrl) {
             URL.revokeObjectURL(
@@ -610,6 +830,8 @@
         contentType,
     ) {
         clearEditorMedia();
+        editorHistory.hidden = true;
+        editorHistoryList.replaceChildren();
 
         try {
             const response = await fetch(
@@ -678,13 +900,23 @@
         }
     }
 
-    function closeEditor() {
+    function closeEditor({ force = false } = {}) {
+        if (!force && state.editorDirty) {
+            confirmDiscardChanges(() => closeEditor({ force: true }));
+            return;
+        }
+
         editorOverlay.hidden = true;
         document.body.classList.remove(
             "editor-open",
         );
         state.editorPublicationId = null;
+        state.editorVersion = 1;
         clearEditorMedia();
+        editorHistory.hidden = true;
+        editorHistoryList.replaceChildren();
+        richEditor.setDocument("", []);
+        setEditorDirty(false);
         setEditorStatus("");
     }
 
@@ -742,12 +974,17 @@
 
             editorType.value =
                 payload.content_type_label;
-            editorText.value =
-                payload.text || "";
-            editorText.maxLength = (
+            state.editorContentType = payload.content_type;
+            state.editorVersion = payload.version;
+            editorVersion.textContent = `Версия ${payload.version}`;
+            richEditor.setLimit(
                 payload.content_type === "text"
                     ? 4096
-                    : 1024
+                    : 1024,
+            );
+            richEditor.setDocument(
+                payload.text || "",
+                payload.text_entities || [],
             );
             const minimum = refreshEditorMinimum();
             editorScheduledAt.value = (
@@ -779,6 +1016,7 @@
             }
 
             setEditorStatus("");
+            setEditorDirty(false);
             editorSave.disabled = false;
 
             if (payload.has_media) {
@@ -826,6 +1064,20 @@
             return;
         }
 
+        const editorDocument = richEditor.getDocument();
+        const characterCount = Array.from(editorDocument.text).length;
+        const maximumLength = (
+            state.editorContentType === "text" ? 4096 : 1024
+        );
+
+        if (characterCount > maximumLength) {
+            setEditorStatus(
+                `Текст длиннее допустимого лимита ${maximumLength} символов.`,
+                "error",
+            );
+            return;
+        }
+
         state.editorLoading = true;
         editorSave.disabled = true;
         setEditorStatus(
@@ -846,7 +1098,9 @@
                         channel_id: Number(
                             editorChannel.value
                         ),
-                        text: editorText.value,
+                        expected_version: state.editorVersion,
+                        text: editorDocument.text,
+                        text_entities: editorDocument.entities,
                         scheduled_local: (
                             editorScheduledAt
                             .value
@@ -877,6 +1131,9 @@
                 );
             }
 
+            state.editorVersion = payload.version;
+            editorVersion.textContent = `Версия ${payload.version}`;
+            setEditorDirty(false);
             setEditorStatus(
                 "Изменения сохранены.",
                 "success",
@@ -885,7 +1142,7 @@
             await loadMonth();
 
             window.setTimeout(
-                closeEditor,
+                () => closeEditor({ force: true }),
                 500,
             );
         } catch (error) {
@@ -932,7 +1189,7 @@
 
     editorClose.addEventListener(
         "click",
-        closeEditor,
+        () => closeEditor(),
     );
 
     editorOverlay.addEventListener(
@@ -942,6 +1199,27 @@
                 closeEditor();
             }
         },
+    );
+
+    editorHistoryToggle.addEventListener(
+        "click",
+        async () => {
+            editorHistory.hidden = !editorHistory.hidden;
+
+            if (!editorHistory.hidden) {
+                await loadVersionHistory();
+            }
+        },
+    );
+
+    editorChannel.addEventListener(
+        "change",
+        () => setEditorDirty(true),
+    );
+
+    editorScheduledAt.addEventListener(
+        "change",
+        () => setEditorDirty(true),
     );
 
     editorForm.addEventListener(

@@ -114,6 +114,7 @@ async def process_publication(
         content_type = publication.content_type
         text = publication.text
         telegram_file_id = publication.telegram_file_id
+        text_entities_json = publication.text_entities_json
 
     try:
         published_message = await send_publication(
@@ -122,6 +123,7 @@ async def process_publication(
             content_type=content_type,
             text=text,
             telegram_file_id=telegram_file_id,
+            text_entities_json=text_entities_json,
         )
 
     except (TelegramAPIError, ValueError) as error:

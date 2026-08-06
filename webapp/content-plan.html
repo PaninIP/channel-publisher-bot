@@ -11,14 +11,18 @@
 
     <link
         rel="stylesheet"
-        href="/static/content-plan.css?v=0.1.2"
+        href="/static/content-plan.css?v=0.2.0"
     >
 
     <script
         src="https://telegram.org/js/telegram-web-app.js"
     ></script>
     <script
-        src="/static/content-plan.js?v=0.1.2"
+        src="/static/rich-editor.js?v=0.2.0"
+        defer
+    ></script>
+    <script
+        src="/static/content-plan.js?v=0.2.0"
         defer
     ></script>
 </head>
@@ -206,23 +210,114 @@
                     >
                 </div>
 
-                <div class="field-group">
-                    <label for="editor-text">
-                        Текст или подпись
-                    </label>
-                    <textarea
-                        id="editor-text"
-                        rows="10"
-                        maxlength="4096"
-                        placeholder="Введите текст публикации"
-                    ></textarea>
-                </div>
+                <section class="rich-editor-section">
+                    <div class="rich-editor-heading">
+                        <div>
+                            <label id="editor-text-label">
+                                Текст или подпись
+                            </label>
+                            <p class="editor-helper">
+                                Выделите фрагмент и примените форматирование.
+                            </p>
+                        </div>
+
+                        <div class="editor-document-state">
+                            <span id="editor-version" class="version-badge">
+                                Версия —
+                            </span>
+                            <span id="editor-dirty" class="dirty-badge" hidden>
+                                Не сохранено
+                            </span>
+                            <button
+                                id="editor-history-toggle"
+                                class="history-toggle"
+                                type="button"
+                            >
+                                История
+                            </button>
+                        </div>
+                    </div>
+
+                    <div
+                        id="editor-toolbar"
+                        class="editor-toolbar"
+                        role="toolbar"
+                        aria-label="Форматирование публикации"
+                    >
+                        <button type="button" data-command="undo" title="Отменить">↶</button>
+                        <button type="button" data-command="redo" title="Повторить">↷</button>
+                        <span class="toolbar-separator" aria-hidden="true"></span>
+                        <button type="button" data-command="bold" title="Жирный"><strong>B</strong></button>
+                        <button type="button" data-command="italic" title="Курсив"><em>I</em></button>
+                        <button type="button" data-command="underline" title="Подчёркнутый"><u>U</u></button>
+                        <button type="button" data-command="strikethrough" title="Зачёркнутый"><s>S</s></button>
+                        <button type="button" data-command="spoiler" title="Скрытый текст">◼</button>
+                        <button type="button" data-command="code" title="Моноширинный текст">&lt;/&gt;</button>
+                        <button type="button" data-command="pre" title="Блок кода">{ }</button>
+                        <button type="button" data-command="quote" title="Цитата">❝</button>
+                        <button type="button" data-command="expandable-quote" title="Сворачиваемая цитата">▾❝</button>
+                        <button type="button" data-command="link" title="Ссылка">🔗</button>
+                        <span class="toolbar-separator" aria-hidden="true"></span>
+                        <button type="button" data-command="clear" title="Очистить форматирование">Tx</button>
+                    </div>
+
+                    <div
+                        id="editor-history"
+                        class="editor-history"
+                        hidden
+                    >
+                        <div class="pane-title-row">
+                            <span>История версий</span>
+                            <span class="preview-note">
+                                Загрузка версии не сохраняет её автоматически
+                            </span>
+                        </div>
+                        <div id="editor-history-list" class="history-list"></div>
+                    </div>
+
+                    <div class="editor-workspace">
+                        <div class="editor-pane">
+                            <div class="pane-title-row">
+                                <span>Редактор</span>
+                                <span id="editor-character-count" class="character-count">0 / 4096</span>
+                            </div>
+                            <div
+                                id="editor-rich-text"
+                                class="rich-text-input"
+                                contenteditable="true"
+                                role="textbox"
+                                aria-labelledby="editor-text-label"
+                                aria-multiline="true"
+                                data-placeholder="Введите текст публикации"
+                                spellcheck="true"
+                            ></div>
+                        </div>
+
+                        <div class="preview-pane">
+                            <div class="pane-title-row">
+                                <span>Предпросмотр Telegram</span>
+                                <span class="preview-note">приближённый вид</span>
+                            </div>
+                            <div class="telegram-message-preview">
+                                <div
+                                    id="editor-preview"
+                                    class="telegram-message-text"
+                                ></div>
+                                <span class="telegram-message-time">12:34 ✓✓</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
 
                 <p class="editor-note">
-                    На этом этапе вложение можно
-                    просмотреть. Замена и удаление
-                    медиа будут добавлены после
-                    подключения хранилища.
+                    Форматирование сохраняется как Telegram MessageEntity,
+                    а не как Markdown. Поэтому ссылки, цитаты и эмодзи не
+                    ломают разметку из-за служебных символов.
+                </p>
+
+                <p class="editor-note">
+                    Замена, удаление и сортировка вложений появятся в следующем
+                    релизе после подключения объектного хранилища.
                 </p>
 
                 <button
