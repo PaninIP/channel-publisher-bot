@@ -5,6 +5,7 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     ForeignKey,
+    Boolean,
     Integer,
     String,
     Text,
@@ -19,6 +20,7 @@ class PublicationContentType(StrEnum):
     TEXT = "text"
     PHOTO = "photo"
     VIDEO = "video"
+    ALBUM = "album"
 
 
 class PublicationStatus(StrEnum):
@@ -79,8 +81,20 @@ class Publication(Base):
         index=True,
     )
 
+    show_caption_above_media: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
+    )
+
     telegram_message_id: Mapped[int | None] = mapped_column(
         BigInteger,
+        nullable=True,
+    )
+
+    telegram_message_ids_json: Mapped[str | None] = mapped_column(
+        Text,
         nullable=True,
     )
 

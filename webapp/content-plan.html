@@ -11,18 +11,18 @@
 
     <link
         rel="stylesheet"
-        href="/static/content-plan.css?v=0.2.0"
+        href="/static/content-plan.css?v=0.2.1"
     >
 
     <script
         src="https://telegram.org/js/telegram-web-app.js"
     ></script>
     <script
-        src="/static/rich-editor.js?v=0.2.0"
+        src="/static/rich-editor.js?v=0.2.1"
         defer
     ></script>
     <script
-        src="/static/content-plan.js?v=0.2.0"
+        src="/static/content-plan.js?v=0.2.1"
         defer
     ></script>
 </head>
@@ -170,12 +170,6 @@
                 aria-live="polite"
             ></div>
 
-            <div
-                id="editor-media"
-                class="editor-media"
-                hidden
-            ></div>
-
             <form id="editor-form">
                 <div class="field-group">
                     <label for="editor-type">
@@ -187,6 +181,68 @@
                         disabled
                     >
                 </div>
+
+                <section
+                    id="editor-media"
+                    class="media-manager"
+                    aria-labelledby="editor-media-title"
+                >
+                    <div class="media-manager-heading">
+                        <div>
+                            <div class="media-manager-title-row">
+                                <h3 id="editor-media-title">Вложения</h3>
+                                <span id="editor-media-count" class="count-badge">0 / 10</span>
+                            </div>
+                            <p class="editor-helper">
+                                JPEG, PNG или MP4. Перетаскивайте карточки,
+                                используйте стрелки или задавайте позицию вручную.
+                            </p>
+                        </div>
+
+                        <button
+                            id="editor-media-add"
+                            class="secondary-button"
+                            type="button"
+                        >
+                            + Добавить
+                        </button>
+                        <input
+                            id="editor-media-input"
+                            type="file"
+                            accept="image/jpeg,image/png,video/mp4"
+                            multiple
+                            hidden
+                        >
+                    </div>
+
+                    <div
+                        id="editor-media-progress"
+                        class="media-upload-progress"
+                        hidden
+                    >
+                        <div class="media-upload-progress-track">
+                            <span id="editor-media-progress-bar"></span>
+                        </div>
+                        <span id="editor-media-progress-text">Подготовка…</span>
+                    </div>
+
+                    <div
+                        id="editor-media-list"
+                        class="media-list"
+                        aria-live="polite"
+                    ></div>
+
+                    <label class="media-option-row">
+                        <input
+                            id="editor-show-caption-above"
+                            type="checkbox"
+                        >
+                        <span>
+                            Показывать подпись над одиночным фото, видео
+                            или первым элементом альбома
+                        </span>
+                    </label>
+                </section>
 
                 <div class="field-group">
                     <label for="editor-channel">
@@ -298,7 +354,12 @@
                                 <span>Предпросмотр Telegram</span>
                                 <span class="preview-note">приближённый вид</span>
                             </div>
-                            <div class="telegram-message-preview">
+                            <div id="editor-telegram-preview" class="telegram-message-preview">
+                                <div
+                                    id="editor-preview-media"
+                                    class="telegram-media-preview"
+                                    hidden
+                                ></div>
                                 <div
                                     id="editor-preview"
                                     class="telegram-message-text"
@@ -316,8 +377,9 @@
                 </p>
 
                 <p class="editor-note">
-                    Замена, удаление и сортировка вложений появятся в следующем
-                    релизе после подключения объектного хранилища.
+                    Операции с вложениями сохраняются сразу и создают новую
+                    версию публикации. Основная кнопка сохраняет текст, канал,
+                    дату и параметры подписи.
                 </p>
 
                 <button

@@ -198,6 +198,7 @@ async def test_scheduled_update_uses_version_and_saves_history() -> None:
                 text_entities_json=('[{"type":"bold","offset":0,"length":6}]'),
                 scheduled_at_utc=utc_now_naive() + timedelta(hours=2),
                 expected_version=1,
+                show_caption_above_media=True,
             )
 
             versions = await repository.list_versions(
@@ -221,6 +222,7 @@ async def test_scheduled_update_uses_version_and_saves_history() -> None:
             assert current.version == 2
             assert current.text == "Вторая версия"
             assert current.channel_id == 2
+            assert current.show_caption_above_media is True
 
             stale_update = await repository.update_scheduled(
                 current,

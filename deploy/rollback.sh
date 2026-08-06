@@ -6,6 +6,7 @@ APP_DIR="${APP_DIR:-/opt/channel-publisher-bot}"
 PREVIOUS_COMMIT_FILE="${APP_DIR}/.deploy/previous_commit"
 TARGET_COMMIT="${TARGET_COMMIT:-}"
 RESTORE_DB="${RESTORE_DB:-}"
+RESTORE_MEDIA="${RESTORE_MEDIA:-}"
 
 cd "${APP_DIR}"
 
@@ -16,6 +17,17 @@ if [[ -z "${TARGET_COMMIT}" ]]; then
     fi
 
     TARGET_COMMIT="$(<"${PREVIOUS_COMMIT_FILE}")"
+fi
+
+if [[ -n "${RESTORE_MEDIA}" ]]; then
+    if [[ ! -f "${RESTORE_MEDIA}" ]]; then
+        echo "Media backup not found: ${RESTORE_MEDIA}" >&2
+        exit 1
+    fi
+
+    docker compose stop bot web
+    rm -rf "${APP_DIR}/data/media"
+    tar -C "${APP_DIR}/data" -xzf "${RESTORE_MEDIA}"
 fi
 
 if [[ -n "${RESTORE_DB}" ]]; then

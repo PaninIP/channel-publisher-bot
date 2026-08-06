@@ -14,6 +14,18 @@ class Settings(BaseSettings):
     mini_app_url: str = ""
     mini_app_auth_max_age_seconds: int = Field(default=3600, gt=0)
 
+    media_storage_backend: str = "local"
+    media_local_root: str = "data/media"
+    media_max_items: int = Field(default=10, ge=1, le=10)
+    media_photo_max_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
+    media_video_max_bytes: int = Field(default=50 * 1024 * 1024, gt=0)
+
+    media_s3_endpoint: str = ""
+    media_s3_region: str = ""
+    media_s3_bucket: str = ""
+    media_s3_key_id: SecretStr = SecretStr("")
+    media_s3_application_key: SecretStr = SecretStr("")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

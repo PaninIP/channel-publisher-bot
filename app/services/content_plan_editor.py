@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 TEXT_MAX_LENGTH = 4096
 MEDIA_CAPTION_MAX_LENGTH = 1024
-MEDIA_CONTENT_TYPES = {"photo", "video"}
+MEDIA_CONTENT_TYPES = {"photo", "video", "album"}
 MIN_TIMEZONE_OFFSET_MINUTES = -(14 * 60)
 MAX_TIMEZONE_OFFSET_MINUTES = 14 * 60
 

@@ -4,6 +4,7 @@ from app.database.models.publication import (
     PublicationContentType,
     PublicationStatus,
 )
+from app.database.models.publication_media import PublicationMedia
 from app.database.models.publication_version import PublicationVersion
 
 __all__ = [
@@ -11,5 +12,6 @@ __all__ = [
     "Publication",
     "PublicationContentType",
     "PublicationStatus",
+    "PublicationMedia",
     "PublicationVersion",
 ]

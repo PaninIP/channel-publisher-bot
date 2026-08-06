@@ -21,6 +21,7 @@ from app.bot.keyboards.publication import (
     get_post_content_keyboard,
 )
 from app.bot.states.publication import CreatePost
+from app.config import get_settings
 from app.database.models import (
     Channel,
     PublicationContentType,
@@ -28,6 +29,9 @@ from app.database.models import (
 )
 from app.database.repositories.channel_repository import (
     ChannelRepository,
+)
+from app.database.repositories.publication_media_repository import (
+    PublicationMediaRepository,
 )
 from app.database.repositories.publication_repository import (
     PublicationRepository,
@@ -37,6 +41,7 @@ from app.services.content_plan_editor import (
     ContentPlanEditorValidationError,
     normalize_publication_text,
 )
+from app.services.media_storage import MediaStorageError
 from app.services.publication_sender import (
     send_publication,
 )
@@ -489,6 +494,7 @@ async def handle_post_publish(
 
     async with SessionFactory() as session:
         publication_repository = PublicationRepository(session)
+        media_repository = PublicationMediaRepository(session)
 
         publication = await publication_repository.get_by_id(
             publication_id=publication_id,
@@ -547,6 +553,11 @@ async def handle_post_publish(
         telegram_file_id = publication.telegram_file_id
         text_entities_json = publication.text_entities_json
         channel_id = publication.channel_id
+        show_caption_above_media = publication.show_caption_above_media
+        media_items = await media_repository.list_by_publication(
+            publication_id=publication.id,
+            owner_telegram_id=callback.from_user.id,
+        )
 
     channel = await get_owner_channel(
         channel_id=channel_id,
@@ -570,14 +581,36 @@ async def handle_post_publish(
         return
 
     try:
-        published_message = await send_publication(
+        send_result = await send_publication(
             bot=bot,
             chat_id=channel.telegram_chat_id,
             content_type=content_type,
             text=text,
             telegram_file_id=telegram_file_id,
             text_entities_json=text_entities_json,
+            media_items=media_items,
+            settings=get_settings(),
+            show_caption_above_media=show_caption_above_media,
         )
+
+    except (MediaStorageError, ValueError) as error:
+        await mark_publication_failed(
+            publication_id=publication_id,
+            owner_telegram_id=callback.from_user.id,
+            error_text=str(error),
+        )
+
+        await callback.message.answer(
+            text=(
+                "❌ Не удалось подготовить вложения к публикации.\n\n"
+                f"Причина: <code>{escape(str(error))}</code>"
+            ),
+        )
+        await callback.answer(
+            text="Не удалось опубликовать",
+            show_alert=True,
+        )
+        return
 
     except TelegramForbiddenError as error:
         await mark_publication_failed(
@@ -649,6 +682,7 @@ async def handle_post_publish(
 
     async with SessionFactory() as session:
         publication_repository = PublicationRepository(session)
+        media_repository = PublicationMediaRepository(session)
 
         publication = await publication_repository.get_by_id(
             publication_id=publication_id,
@@ -656,9 +690,15 @@ async def handle_post_publish(
         )
 
         if publication is not None:
+            await media_repository.cache_telegram_file_ids(
+                publication_id=publication_id,
+                owner_telegram_id=callback.from_user.id,
+                file_ids_by_media_id=send_result.file_ids_by_media_id,
+            )
             recorded = await publication_repository.mark_published(
                 publication,
-                telegram_message_id=(published_message.message_id),
+                telegram_message_id=send_result.primary_message.message_id,
+                telegram_message_ids=send_result.message_ids,
             )
 
     await state.clear()
@@ -668,12 +708,12 @@ async def handle_post_publish(
             "Publication %s was sent as Telegram message %s, "
             "but its database status was not recorded",
             publication_id,
-            published_message.message_id,
+            send_result.primary_message.message_id,
         )
         await callback.message.answer(
             text=(
                 "⚠️ Пост отправлен, но результат не записан в базу.\n\n"
-                f"ID сообщения: <code>{published_message.message_id}</code>\n"
+                f"ID сообщения: <code>{send_result.primary_message.message_id}</code>\n"
                 "Не повторяйте отправку до ручной проверки канала."
             ),
             reply_markup=get_main_menu(),
@@ -694,11 +734,13 @@ async def handle_post_publish(
         f"ID публикации: "
         f"<code>{publication_id}</code>\n"
         f"ID сообщения: "
-        f"<code>{published_message.message_id}</code>"
+        f"<code>{send_result.primary_message.message_id}</code>"
     )
 
     if channel.username:
-        post_url = f"https://t.me/{channel.username}/{published_message.message_id}"
+        post_url = (
+            f"https://t.me/{channel.username}/{send_result.primary_message.message_id}"
+        )
 
         result_text += f'\n\n<a href="{post_url}">Открыть публикацию</a>'
 
