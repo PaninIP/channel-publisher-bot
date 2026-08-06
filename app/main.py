@@ -5,6 +5,7 @@ from contextlib import suppress
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import SimpleEventIsolation
 
 from app.bot.handlers.content_plan import (
     router as content_plan_router,
@@ -44,7 +45,9 @@ async def main() -> None:
         ),
     )
 
-    dispatcher = Dispatcher()
+    dispatcher = Dispatcher(
+        events_isolation=SimpleEventIsolation(),
+    )
 
     dispatcher.include_router(start_router)
     dispatcher.include_router(settings_router)
@@ -65,6 +68,9 @@ async def main() -> None:
             run_publication_worker(
                 bot=bot,
                 interval_seconds=(settings.publication_worker_interval_seconds),
+                publishing_timeout_seconds=(
+                    settings.publication_publishing_timeout_seconds
+                ),
             ),
             name="publication-worker",
         )

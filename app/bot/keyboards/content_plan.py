@@ -38,7 +38,7 @@ def get_content_plan_keyboard(
         )
 
     builder.button(
-        text="?? ????????",
+        text="🔄 Обновить",
         callback_data="plan:list",
     )
     builder.adjust(1)
@@ -53,19 +53,19 @@ def get_publication_actions_keyboard(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="?? ????????????",
+                    text="👁 Предпросмотр",
                     callback_data=f"plan:preview:{publication_id}",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    text="? ???????? ??????????",
+                    text="❌ Отменить публикацию",
                     callback_data=f"plan:cancel:{publication_id}",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    text="?? ? ???????-?????",
+                    text="⬅️ В контент-план",
                     callback_data="plan:list",
                 ),
             ],
@@ -80,13 +80,13 @@ def get_cancel_confirmation_keyboard(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="? ??, ????????",
+                    text="✅ Да, отменить",
                     callback_data=(f"plan:cancel_confirm:{publication_id}"),
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    text="?? ???, ?????????",
+                    text="↩️ Нет, вернуться",
                     callback_data=f"plan:view:{publication_id}",
                 ),
             ],
@@ -99,7 +99,7 @@ def get_back_to_plan_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="?? ? ???????-?????",
+                    text="⬅️ В контент-план",
                     callback_data="plan:list",
                 ),
             ],

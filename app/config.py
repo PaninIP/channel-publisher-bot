@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,9 +9,10 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/app.db"
 
     app_timezone: str = "Europe/Moscow"
-    publication_worker_interval_seconds: int = 10
+    publication_worker_interval_seconds: int = Field(default=10, gt=0)
+    publication_publishing_timeout_seconds: int = Field(default=300, gt=0)
     mini_app_url: str = ""
-    mini_app_auth_max_age_seconds: int = 86400
+    mini_app_auth_max_age_seconds: int = Field(default=3600, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",

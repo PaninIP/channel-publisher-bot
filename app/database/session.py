@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import (
 
 from app.config import get_settings
 from app.database.base import Base
+from app.database.migrations import apply_sqlite_migrations
 from app.database.models import Channel, Publication  # noqa: F401
 
 settings = get_settings()
@@ -36,6 +37,7 @@ async def init_database() -> None:
         await connection.run_sync(
             Base.metadata.create_all,
         )
+        await apply_sqlite_migrations(connection)
 
 
 async def close_database() -> None:

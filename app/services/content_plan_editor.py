@@ -1,6 +1,10 @@
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+TEXT_MAX_LENGTH = 4096
+MEDIA_CAPTION_MAX_LENGTH = 1024
+MEDIA_CONTENT_TYPES = {"photo", "video"}
+
 
 class ContentPlanEditorValidationError(ValueError):
     pass
@@ -13,12 +17,31 @@ def normalize_publication_text(
 ) -> str | None:
     normalized = text.strip() if text else None
 
-    if content_type == "text" and not normalized:
-        raise ContentPlanEditorValidationError(
-            "Текстовая публикация не может быть пустой."
-        )
+    if content_type == "text":
+        if not normalized:
+            raise ContentPlanEditorValidationError(
+                "Текстовая публикация не может быть пустой."
+            )
 
-    return normalized
+        if len(normalized) > TEXT_MAX_LENGTH:
+            raise ContentPlanEditorValidationError(
+                "Текст слишком длинный. Максимальная длина — 4096 символов."
+            )
+
+        return normalized
+
+    if content_type in MEDIA_CONTENT_TYPES:
+        if normalized and len(normalized) > MEDIA_CAPTION_MAX_LENGTH:
+            raise ContentPlanEditorValidationError(
+                "Подпись к фото или видео слишком длинная. "
+                "Максимальная длина — 1024 символа."
+            )
+
+        return normalized
+
+    raise ContentPlanEditorValidationError(
+        f"Неизвестный тип публикации: {content_type}."
+    )
 
 
 def parse_scheduled_local(

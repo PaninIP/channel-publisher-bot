@@ -667,6 +667,11 @@
                 payload.content_type_label;
             editorText.value =
                 payload.text || "";
+            editorText.maxLength = (
+                payload.content_type === "text"
+                    ? 4096
+                    : 1024
+            );
             editorScheduledAt.value =
                 payload.scheduled_local;
 
