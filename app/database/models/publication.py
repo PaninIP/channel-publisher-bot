@@ -5,6 +5,7 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
     func,
@@ -61,6 +62,11 @@ class Publication(Base):
         nullable=True,
     )
 
+    text_entities_json: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
     telegram_file_id: Mapped[str | None] = mapped_column(
         String(512),
         nullable=True,
@@ -96,6 +102,20 @@ class Publication(Base):
     publishing_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
     created_at: Mapped[datetime] = mapped_column(

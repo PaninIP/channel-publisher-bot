@@ -17,10 +17,12 @@ def normalize_publication_text(
     *,
     content_type: str,
 ) -> str | None:
-    normalized = text.strip() if text else None
+    normalized = (
+        text.replace("\r\n", "\n").replace("\r", "\n") if text is not None else None
+    )
 
     if content_type == "text":
-        if not normalized:
+        if not normalized or not normalized.strip():
             raise ContentPlanEditorValidationError(
                 "Текстовая публикация не может быть пустой."
             )
@@ -33,7 +35,10 @@ def normalize_publication_text(
         return normalized
 
     if content_type in MEDIA_CONTENT_TYPES:
-        if normalized and len(normalized) > MEDIA_CAPTION_MAX_LENGTH:
+        if not normalized or not normalized.strip():
+            return None
+
+        if len(normalized) > MEDIA_CAPTION_MAX_LENGTH:
             raise ContentPlanEditorValidationError(
                 "Подпись к фото или видео слишком длинная. "
                 "Максимальная длина — 1024 символа."

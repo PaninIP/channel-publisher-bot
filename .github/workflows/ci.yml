@@ -45,6 +45,7 @@ jobs:
         run: |
           node --check webapp/app.js
           node --check webapp/content-plan.js
+          node --check webapp/rich-editor.js
 
       - name: Check deployment scripts
         run: |

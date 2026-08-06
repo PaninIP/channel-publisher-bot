@@ -161,3 +161,76 @@ async def test_future_scheduled_publication_cannot_be_claimed_as_due() -> None:
         assert claimed is None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_scheduled_update_uses_version_and_saves_history() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+
+        session_factory = async_sessionmaker(
+            engine,
+            expire_on_commit=False,
+        )
+
+        async with session_factory() as session:
+            publication = Publication(
+                owner_telegram_id=40,
+                channel_id=1,
+                content_type="text",
+                text="Первая версия",
+                status=PublicationStatus.SCHEDULED.value,
+                scheduled_at=utc_now_naive() + timedelta(hours=1),
+                version=1,
+            )
+            session.add(publication)
+            await session.commit()
+            await session.refresh(publication)
+
+            repository = PublicationRepository(session)
+            next_version = await repository.update_scheduled(
+                publication,
+                channel_id=2,
+                text="Вторая версия",
+                text_entities_json=('[{"type":"bold","offset":0,"length":6}]'),
+                scheduled_at_utc=utc_now_naive() + timedelta(hours=2),
+                expected_version=1,
+            )
+
+            versions = await repository.list_versions(
+                publication_id=publication.id,
+                owner_telegram_id=40,
+            )
+
+        assert next_version == 2
+        assert len(versions) == 1
+        assert versions[0].version == 1
+        assert "Первая версия" in versions[0].snapshot_json
+
+        async with session_factory() as session:
+            repository = PublicationRepository(session)
+            current = await repository.get_by_id(
+                publication_id=publication.id,
+                owner_telegram_id=40,
+            )
+
+            assert current is not None
+            assert current.version == 2
+            assert current.text == "Вторая версия"
+            assert current.channel_id == 2
+
+            stale_update = await repository.update_scheduled(
+                current,
+                channel_id=3,
+                text="Конфликт",
+                text_entities_json=None,
+                scheduled_at_utc=utc_now_naive() + timedelta(hours=3),
+                expected_version=1,
+            )
+
+            assert stale_update is None
+    finally:
+        await engine.dispose()

@@ -1,4 +1,8 @@
+from __future__ import annotations
+
+import json
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,12 +10,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.models import (
     Publication,
     PublicationStatus,
+    PublicationVersion,
 )
 
 
 def utc_now_naive() -> datetime:
     """Возвращает текущее UTC-время без tzinfo для совместимости с SQLite."""
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def build_publication_snapshot(publication: Publication) -> str:
+    payload: dict[str, Any] = {
+        "channel_id": publication.channel_id,
+        "content_type": publication.content_type,
+        "text": publication.text,
+        "text_entities_json": publication.text_entities_json,
+        "scheduled_at": (
+            publication.scheduled_at.isoformat()
+            if publication.scheduled_at is not None
+            else None
+        ),
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 class PublicationRepository:
@@ -29,14 +49,17 @@ class PublicationRepository:
         content_type: str,
         text: str | None,
         telegram_file_id: str | None,
+        text_entities_json: str | None = None,
     ) -> Publication:
         publication = Publication(
             owner_telegram_id=owner_telegram_id,
             channel_id=channel_id,
             content_type=content_type,
             text=text,
+            text_entities_json=text_entities_json,
             telegram_file_id=telegram_file_id,
             status=PublicationStatus.DRAFT.value,
+            version=1,
         )
 
         self.session.add(publication)
@@ -60,6 +83,29 @@ class PublicationRepository:
         result = await self.session.execute(statement)
 
         return result.scalar_one_or_none()
+
+    async def list_versions(
+        self,
+        *,
+        publication_id: int,
+        owner_telegram_id: int,
+        limit: int = 30,
+    ) -> list[PublicationVersion]:
+        statement = (
+            select(PublicationVersion)
+            .where(
+                PublicationVersion.publication_id == publication_id,
+                PublicationVersion.owner_telegram_id == owner_telegram_id,
+            )
+            .order_by(
+                PublicationVersion.version.desc(),
+                PublicationVersion.id.desc(),
+            )
+            .limit(limit)
+        )
+
+        result = await self.session.execute(statement)
+        return list(result.scalars().all())
 
     async def list_scheduled_by_owner(
         self,
@@ -155,6 +201,7 @@ class PublicationRepository:
                 scheduled_at=scheduled_at_utc,
                 error_text=None,
                 publishing_started_at=None,
+                updated_at=utc_now_naive(),
             )
         )
 
@@ -181,27 +228,49 @@ class PublicationRepository:
         *,
         channel_id: int,
         text: str | None,
+        text_entities_json: str | None,
         scheduled_at_utc: datetime,
-    ) -> bool:
+        expected_version: int,
+    ) -> int | None:
+        previous_snapshot = build_publication_snapshot(publication)
+        next_version = expected_version + 1
+
         statement = (
             update(Publication)
             .where(
                 Publication.id == publication.id,
                 Publication.owner_telegram_id == publication.owner_telegram_id,
                 Publication.status == PublicationStatus.SCHEDULED.value,
+                Publication.version == expected_version,
             )
             .values(
                 channel_id=channel_id,
                 text=text,
+                text_entities_json=text_entities_json,
                 scheduled_at=scheduled_at_utc,
                 error_text=None,
+                version=next_version,
+                updated_at=utc_now_naive(),
             )
         )
 
         result = await self.session.execute(statement)
+
+        if result.rowcount != 1:
+            await self.session.rollback()
+            return None
+
+        self.session.add(
+            PublicationVersion(
+                publication_id=publication.id,
+                owner_telegram_id=publication.owner_telegram_id,
+                version=expected_version,
+                snapshot_json=previous_snapshot,
+            )
+        )
         await self.session.commit()
 
-        return result.rowcount == 1
+        return next_version
 
     async def claim_for_publishing(
         self,
@@ -232,6 +301,7 @@ class PublicationRepository:
                 status=PublicationStatus.PUBLISHING.value,
                 publishing_started_at=utc_now_naive(),
                 error_text=None,
+                updated_at=utc_now_naive(),
             )
         )
 
@@ -276,6 +346,7 @@ class PublicationRepository:
                 published_at=utc_now_naive(),
                 publishing_started_at=None,
                 error_text=None,
+                updated_at=utc_now_naive(),
             )
         )
 
@@ -306,6 +377,7 @@ class PublicationRepository:
                 status=PublicationStatus.FAILED.value,
                 error_text=error_text[:2000],
                 publishing_started_at=None,
+                updated_at=utc_now_naive(),
             )
         )
 
@@ -331,6 +403,7 @@ class PublicationRepository:
             .values(
                 status=PublicationStatus.CANCELLED.value,
                 publishing_started_at=None,
+                updated_at=utc_now_naive(),
             )
         )
 
@@ -392,6 +465,7 @@ class PublicationRepository:
             .values(
                 status=PublicationStatus.FAILED.value,
                 publishing_started_at=None,
+                updated_at=utc_now_naive(),
                 error_text=(
                     "Публикация была прервана во время отправки. "
                     "Автоматический повтор отключён, чтобы избежать дубликата."

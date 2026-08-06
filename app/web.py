@@ -1,7 +1,8 @@
+import json
 from datetime import UTC, datetime, timedelta, timezone as fixed_timezone, tzinfo
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiogram import Bot
@@ -42,6 +43,12 @@ from app.services.content_plan_editor import (
     normalize_publication_text,
     parse_scheduled_local,
 )
+from app.services.telegram_entities import (
+    TelegramEntityValidationError,
+    dump_telegram_entities,
+    load_telegram_entities,
+    normalize_telegram_entities,
+)
 from app.services.telegram_webapp import (
     TelegramWebAppAuthError,
     validate_telegram_init_data,
@@ -61,13 +68,39 @@ MEDIA_CONTENT_TYPES = {
 }
 
 
+class PublicationEntityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal[
+        "bold",
+        "italic",
+        "underline",
+        "strikethrough",
+        "spoiler",
+        "blockquote",
+        "expandable_blockquote",
+        "code",
+        "pre",
+        "text_link",
+    ]
+    offset: int = Field(ge=0)
+    length: int = Field(gt=0)
+    url: str | None = Field(default=None, max_length=2048)
+    language: str | None = Field(default=None, max_length=64)
+
+
 class PublicationUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     channel_id: int = Field(gt=0)
+    expected_version: int = Field(ge=1)
     text: str | None = Field(
         default=None,
         max_length=4096,
+    )
+    text_entities: list[PublicationEntityRequest] = Field(
+        default_factory=list,
+        max_length=100,
     )
     scheduled_local: str = Field(
         min_length=16,
@@ -476,6 +509,8 @@ async def get_publication_details(
             )
         ),
         "text": publication.text or "",
+        "text_entities": load_telegram_entities(publication.text_entities_json),
+        "version": publication.version,
         "scheduled_local": (scheduled_local.strftime("%Y-%m-%dT%H:%M")),
         "timezone": requested_timezone_name,
         "has_media": bool(
@@ -537,37 +572,154 @@ async def update_publication(
                 payload.text,
                 content_type=(publication.content_type),
             )
+            normalized_entities = normalize_telegram_entities(
+                normalized_text or "",
+                [
+                    entity.model_dump(exclude_none=True)
+                    for entity in payload.text_entities
+                ],
+            )
+            entities_json = dump_telegram_entities(normalized_entities)
             scheduled_at_utc = parse_scheduled_local(
                 payload.scheduled_local,
                 timezone_name=payload.timezone,
                 timezone_offset_minutes=(payload.timezone_offset_minutes),
             )
-        except ContentPlanEditorValidationError as error:
+        except (
+            ContentPlanEditorValidationError,
+            TelegramEntityValidationError,
+        ) as error:
             raise HTTPException(
                 status_code=(status.HTTP_422_UNPROCESSABLE_ENTITY),
                 detail=str(error),
             ) from error
 
-        updated = await publication_repository.update_scheduled(
+        next_version = await publication_repository.update_scheduled(
             publication,
             channel_id=channel.id,
             text=normalized_text,
+            text_entities_json=entities_json,
             scheduled_at_utc=(scheduled_at_utc),
+            expected_version=payload.expected_version,
         )
 
-        if not updated:
+        if next_version is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    "Публикация уже отправляется, была отменена "
-                    "или больше недоступна для редактирования."
+                    "Публикация уже изменилась в другом окне, отправляется, "
+                    "была отменена или больше недоступна. Обновите редактор."
                 ),
             )
 
     return {
         "status": "updated",
         "publication_id": publication_id,
+        "version": next_version,
     }
+
+
+@app.get("/api/publications/{publication_id}/versions")
+async def get_publication_versions(
+    publication_id: int,
+    timezone: str | None = Query(default=None, max_length=64),
+    timezone_offset_minutes: int | None = Query(
+        default=None,
+        ge=-(14 * 60),
+        le=14 * 60,
+    ),
+    telegram_init_data: str = Header(alias="X-Telegram-Init-Data"),
+) -> dict[str, object]:
+    settings = get_settings()
+    user = authenticate_telegram_user(
+        telegram_init_data,
+        settings=settings,
+    )
+    requested_timezone, _ = get_requested_timezone(
+        timezone,
+        timezone_offset_minutes,
+        settings=settings,
+    )
+    owner_telegram_id = int(user["id"])
+
+    async with SessionFactory() as session:
+        repository = PublicationRepository(session)
+        publication = await repository.get_by_id(
+            publication_id=publication_id,
+            owner_telegram_id=owner_telegram_id,
+        )
+
+        if publication is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Публикация не найдена.",
+            )
+
+        if publication.status != PublicationStatus.SCHEDULED.value:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="История доступна только для запланированной публикации.",
+            )
+
+        versions = await repository.list_versions(
+            publication_id=publication_id,
+            owner_telegram_id=owner_telegram_id,
+        )
+
+    def serialize_scheduled(value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        return to_local_datetime(
+            value,
+            timezone=requested_timezone,
+        ).strftime("%Y-%m-%dT%H:%M")
+
+    items: list[dict[str, object]] = [
+        {
+            "version": publication.version,
+            "is_current": True,
+            "channel_id": publication.channel_id,
+            "text": publication.text or "",
+            "text_entities": load_telegram_entities(publication.text_entities_json),
+            "scheduled_local": serialize_scheduled(publication.scheduled_at),
+            "created_at": to_local_datetime(
+                publication.updated_at,
+                timezone=requested_timezone,
+            ).isoformat(),
+        }
+    ]
+
+    for version in versions:
+        try:
+            snapshot = json.loads(version.snapshot_json)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        scheduled_value = snapshot.get("scheduled_at")
+        scheduled_at = (
+            datetime.fromisoformat(scheduled_value)
+            if isinstance(scheduled_value, str) and scheduled_value
+            else None
+        )
+
+        items.append(
+            {
+                "version": version.version,
+                "is_current": False,
+                "channel_id": snapshot.get("channel_id"),
+                "text": snapshot.get("text") or "",
+                "text_entities": load_telegram_entities(
+                    snapshot.get("text_entities_json")
+                ),
+                "scheduled_local": serialize_scheduled(scheduled_at),
+                "created_at": to_local_datetime(
+                    version.created_at,
+                    timezone=requested_timezone,
+                ).isoformat(),
+            }
+        )
+
+    return {"items": items}
 
 
 @app.get("/api/publications/{publication_id}/media")

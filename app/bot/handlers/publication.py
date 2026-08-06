@@ -545,6 +545,7 @@ async def handle_post_publish(
         content_type = publication.content_type
         text = publication.text
         telegram_file_id = publication.telegram_file_id
+        text_entities_json = publication.text_entities_json
         channel_id = publication.channel_id
 
     channel = await get_owner_channel(
@@ -575,6 +576,7 @@ async def handle_post_publish(
             content_type=content_type,
             text=text,
             telegram_file_id=telegram_file_id,
+            text_entities_json=text_entities_json,
         )
 
     except TelegramForbiddenError as error:
