@@ -52,6 +52,36 @@
     const editorMedia = document.getElementById(
         "editor-media",
     );
+    const editorMediaCount = document.getElementById(
+        "editor-media-count",
+    );
+    const editorMediaAdd = document.getElementById(
+        "editor-media-add",
+    );
+    const editorMediaInput = document.getElementById(
+        "editor-media-input",
+    );
+    const editorMediaList = document.getElementById(
+        "editor-media-list",
+    );
+    const editorMediaProgress = document.getElementById(
+        "editor-media-progress",
+    );
+    const editorMediaProgressBar = document.getElementById(
+        "editor-media-progress-bar",
+    );
+    const editorMediaProgressText = document.getElementById(
+        "editor-media-progress-text",
+    );
+    const editorShowCaptionAbove = document.getElementById(
+        "editor-show-caption-above",
+    );
+    const editorTelegramPreview = document.getElementById(
+        "editor-telegram-preview",
+    );
+    const editorPreviewMedia = document.getElementById(
+        "editor-preview-media",
+    );
     const editorType = document.getElementById(
         "editor-type",
     );
@@ -112,6 +142,7 @@
         text: "T",
         photo: "▧",
         video: "▶",
+        album: "▦",
     };
 
     const deviceTimezone = (
@@ -136,7 +167,17 @@
         editorDirty: false,
         editorContentType: "text",
         historyLoading: false,
-        mediaObjectUrl: null,
+        editorMediaItems: [],
+        editorShowCaptionAbove: false,
+        editorMediaMaxItems: 10,
+        editorPhotoMaxBytes: 10 * 1024 * 1024,
+        editorVideoMaxBytes: 50 * 1024 * 1024,
+        editorMediaBusy: false,
+        editorMediaObjectUrls: new Map(),
+        editorMediaRenderToken: 0,
+        draggedMediaId: null,
+        pointerDragMediaId: null,
+        pointerDragChanged: false,
     };
 
     const richEditor = new window.RichTelegramEditor({
@@ -813,92 +854,780 @@
         }
     }
 
-    function clearEditorMedia() {
-        if (state.mediaObjectUrl) {
-            URL.revokeObjectURL(
-                state.mediaObjectUrl
-            );
-            state.mediaObjectUrl = null;
+    function formatFileSize(value) {
+        const bytes = Number(value || 0);
+        if (!bytes) {
+            return "размер неизвестен";
         }
-
-        editorMedia.replaceChildren();
-        editorMedia.hidden = true;
+        if (bytes < 1024 * 1024) {
+            return `${Math.ceil(bytes / 1024)} КБ`;
+        }
+        return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
     }
 
-    async function loadEditorMedia(
-        publicationId,
-        contentType,
-    ) {
-        clearEditorMedia();
-        editorHistory.hidden = true;
-        editorHistoryList.replaceChildren();
+    function updateEditorVersion(version) {
+        state.editorVersion = Number(version);
+        editorVersion.textContent = `Версия ${state.editorVersion}`;
+    }
 
+    function updateEditorContentType(contentType) {
+        state.editorContentType = contentType;
+        const labels = {
+            text: "Текст",
+            photo: "Фотография",
+            video: "Видео",
+            album: "Альбом",
+        };
+        editorType.value = labels[contentType] || contentType;
+        richEditor.setLimit(contentType === "text" ? 4096 : 1024);
+    }
+
+    function setMediaBusy(isBusy) {
+        state.editorMediaBusy = isBusy;
+        editorMedia.dataset.busy = String(isBusy);
+        editorMediaAdd.disabled = (
+            isBusy
+            || state.editorMediaItems.length >= state.editorMediaMaxItems
+        );
+        for (const control of editorMediaList.querySelectorAll(
+            "button, input, select",
+        )) {
+            control.disabled = (
+                isBusy || control.dataset.boundaryDisabled === "true"
+            );
+        }
+        editorShowCaptionAbove.disabled = (
+            isBusy || state.editorMediaItems.length === 0
+        );
+    }
+
+    function showMediaProgress(value, text) {
+        const percent = Math.max(0, Math.min(100, Number(value) || 0));
+        editorMediaProgress.hidden = false;
+        editorMediaProgressBar.style.width = `${percent}%`;
+        editorMediaProgressText.textContent = text;
+    }
+
+    function hideMediaProgress() {
+        editorMediaProgress.hidden = true;
+        editorMediaProgressBar.style.width = "0%";
+        editorMediaProgressText.textContent = "Подготовка…";
+    }
+
+    function revokeEditorMediaUrls() {
+        for (const objectUrl of state.editorMediaObjectUrls.values()) {
+            URL.revokeObjectURL(objectUrl);
+        }
+        state.editorMediaObjectUrls.clear();
+    }
+
+    function resetEditorMedia() {
+        state.editorMediaRenderToken += 1;
+        revokeEditorMediaUrls();
+        state.editorMediaItems = [];
+        state.draggedMediaId = null;
+        state.pointerDragMediaId = null;
+        state.pointerDragChanged = false;
+        editorMediaList.replaceChildren();
+        editorPreviewMedia.replaceChildren();
+        editorPreviewMedia.hidden = true;
+        state.editorShowCaptionAbove = false;
+        editorShowCaptionAbove.checked = false;
+        editorTelegramPreview.dataset.captionAbove = "false";
+        editorMediaCount.textContent = `0 / ${state.editorMediaMaxItems}`;
+        hideMediaProgress();
+        setMediaBusy(false);
+    }
+
+    function applyMediaPayload(payload, { render = true } = {}) {
+        updateEditorVersion(payload.version);
+        updateEditorContentType(payload.content_type);
+        state.editorMediaItems = [...(payload.media || [])].sort(
+            (left, right) => left.position - right.position,
+        );
+        if (typeof payload.show_caption_above_media === "boolean") {
+            state.editorShowCaptionAbove = payload.show_caption_above_media;
+        }
+        if (render) {
+            renderMediaManager();
+        }
+    }
+
+    async function fetchMediaObjectUrl(item, renderToken) {
+        const response = await fetch(item.preview_url, {
+            headers: getAuthHeaders(),
+        });
+        if (!response.ok) {
+            let detail = "Не удалось загрузить превью.";
+            try {
+                const payload = await response.json();
+                detail = payload.detail || detail;
+            } catch {
+                // Response is not JSON.
+            }
+            throw new Error(detail);
+        }
+        const objectUrl = URL.createObjectURL(await response.blob());
+        if (renderToken !== state.editorMediaRenderToken) {
+            URL.revokeObjectURL(objectUrl);
+            return null;
+        }
+        state.editorMediaObjectUrls.set(item.id, objectUrl);
+        return objectUrl;
+    }
+
+    function createMediaElement(item, objectUrl, { preview = false } = {}) {
+        const element = document.createElement(
+            item.media_type === "video" ? "video" : "img",
+        );
+        element.src = objectUrl;
+        if (item.media_type === "video") {
+            element.playsInline = true;
+            element.preload = "metadata";
+            element.muted = preview;
+            element.controls = !preview;
+        } else {
+            element.alt = `Вложение ${item.position}: ${item.original_filename}`;
+        }
+        return element;
+    }
+
+    function renderTelegramMediaPreview() {
+        editorPreviewMedia.replaceChildren();
+        const items = state.editorMediaItems;
+        const hasMedia = items.length > 0;
+        editorPreviewMedia.hidden = !hasMedia;
+        editorShowCaptionAbove.disabled = state.editorMediaBusy || !hasMedia;
+        editorTelegramPreview.dataset.captionAbove = String(
+            hasMedia && editorShowCaptionAbove.checked,
+        );
+
+        if (!hasMedia) {
+            return;
+        }
+
+        const visibleItems = items.slice(0, 4);
+        editorPreviewMedia.dataset.count = (
+            items.length === 1
+                ? "1"
+                : items.length <= 4
+                    ? String(items.length)
+                    : "many"
+        );
+
+        visibleItems.forEach((item, index) => {
+            const container = document.createElement("div");
+            container.className = "telegram-media-preview-item";
+            const objectUrl = state.editorMediaObjectUrls.get(item.id);
+            if (objectUrl) {
+                container.append(createMediaElement(item, objectUrl, { preview: true }));
+            } else {
+                const placeholder = document.createElement("span");
+                placeholder.className = "media-thumb-placeholder";
+                placeholder.textContent = item.media_type === "video" ? "Видео" : "Фото";
+                container.append(placeholder);
+            }
+            if (items.length > 4 && index === 3) {
+                const more = document.createElement("span");
+                more.className = "telegram-media-preview-more";
+                more.textContent = `+${items.length - 3}`;
+                container.append(more);
+            }
+            editorPreviewMedia.append(container);
+        });
+    }
+
+    function mediaOrderFromDom() {
+        return [...editorMediaList.querySelectorAll(".media-card")]
+            .map((card) => Number(card.dataset.mediaId))
+            .filter(Number.isInteger);
+    }
+
+    function positionMediaCard(draggedCard, targetCard, clientY) {
+        if (!draggedCard || !targetCard || draggedCard === targetCard) {
+            return false;
+        }
+        const rectangle = targetCard.getBoundingClientRect();
+        const after = clientY > rectangle.top + rectangle.height / 2;
+        editorMediaList.insertBefore(
+            draggedCard,
+            after ? targetCard.nextSibling : targetCard,
+        );
+        return true;
+    }
+
+    async function parseJsonResponse(response) {
+        let payload = {};
+        try {
+            payload = await response.json();
+        } catch {
+            // Keep empty payload for non-JSON errors.
+        }
+        if (!response.ok) {
+            throw new Error(payload.detail || `Ошибка HTTP ${response.status}.`);
+        }
+        return payload;
+    }
+
+    function getClientMediaContentType(file) {
+        if (file.type) {
+            return file.type.toLowerCase();
+        }
+        const filename = file.name.toLowerCase();
+        if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) {
+            return "image/jpeg";
+        }
+        if (filename.endsWith(".png")) {
+            return "image/png";
+        }
+        if (filename.endsWith(".mp4")) {
+            return "video/mp4";
+        }
+        return "";
+    }
+
+    function uploadRawMedia(file, { mediaId = null, progressLabel = "Загрузка" } = {}) {
+        return new Promise((resolve, reject) => {
+            const method = mediaId === null ? "POST" : "PUT";
+            const suffix = mediaId === null ? "media" : `media/${mediaId}`;
+            const request = new XMLHttpRequest();
+            request.open(
+                method,
+                `/api/publications/${state.editorPublicationId}/${suffix}`,
+            );
+            request.responseType = "json";
+            request.setRequestHeader(
+                "X-Telegram-Init-Data",
+                telegram?.initData || "",
+            );
+            request.setRequestHeader("X-Expected-Version", String(state.editorVersion));
+            request.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
+            request.setRequestHeader(
+                "Content-Type",
+                getClientMediaContentType(file) || "application/octet-stream",
+            );
+            request.upload.addEventListener("progress", (event) => {
+                if (!event.lengthComputable) {
+                    showMediaProgress(10, `${progressLabel}: ${file.name}`);
+                    return;
+                }
+                showMediaProgress(
+                    Math.round((event.loaded / event.total) * 100),
+                    `${progressLabel}: ${file.name}`,
+                );
+            });
+            request.addEventListener("load", () => {
+                const payload = request.response || {};
+                if (request.status < 200 || request.status >= 300) {
+                    reject(new Error(payload.detail || `Ошибка HTTP ${request.status}.`));
+                    return;
+                }
+                resolve(payload);
+            });
+            request.addEventListener("error", () => {
+                reject(new Error("Сеть прервала загрузку вложения."));
+            });
+            request.addEventListener("abort", () => {
+                reject(new Error("Загрузка вложения отменена."));
+            });
+            request.send(file);
+        });
+    }
+
+    function validateClientMediaFile(file) {
+        const contentType = getClientMediaContentType(file);
+        const supported = new Set(["image/jpeg", "image/png", "video/mp4"]);
+        if (!supported.has(contentType)) {
+            throw new Error(`Файл «${file.name}»: поддерживаются JPEG, PNG и MP4.`);
+        }
+        const maximum = contentType === "video/mp4"
+            ? state.editorVideoMaxBytes
+            : state.editorPhotoMaxBytes;
+        if (file.size > maximum) {
+            throw new Error(
+                `Файл «${file.name}» больше лимита ${formatFileSize(maximum)}.`,
+            );
+        }
+    }
+
+    async function addMediaFiles(fileList) {
+        const files = [...fileList];
+        if (!files.length || state.editorMediaBusy) {
+            return;
+        }
+        const available = state.editorMediaMaxItems - state.editorMediaItems.length;
+        if (files.length > available) {
+            setEditorStatus(
+                `Можно добавить ещё ${available} вложений. Максимум — ${state.editorMediaMaxItems}.`,
+                "error",
+            );
+            return;
+        }
+        try {
+            files.forEach(validateClientMediaFile);
+        } catch (error) {
+            setEditorStatus(error.message, "error");
+            return;
+        }
+
+        setMediaBusy(true);
+        let completed = 0;
+        try {
+            for (const file of files) {
+                const payload = await uploadRawMedia(file, {
+                    progressLabel: `Файл ${completed + 1} из ${files.length}`,
+                });
+                applyMediaPayload(payload, { render: false });
+                completed += 1;
+            }
+            renderMediaManager();
+            setEditorStatus(
+                files.length === 1
+                    ? "Вложение добавлено и сохранено."
+                    : `Добавлено и сохранено вложений: ${files.length}.`,
+                "success",
+            );
+        } catch (error) {
+            renderMediaManager();
+            setEditorStatus(
+                completed
+                    ? `${error.message} Успешно добавлено до ошибки: ${completed}.`
+                    : error.message,
+                "error",
+            );
+        } finally {
+            editorMediaInput.value = "";
+            hideMediaProgress();
+            setMediaBusy(false);
+        }
+    }
+
+    async function replaceMediaFile(mediaId, file) {
+        if (!file || state.editorMediaBusy) {
+            return;
+        }
+        try {
+            validateClientMediaFile(file);
+        } catch (error) {
+            setEditorStatus(error.message, "error");
+            return;
+        }
+        setMediaBusy(true);
+        try {
+            const payload = await uploadRawMedia(file, {
+                mediaId,
+                progressLabel: "Замена",
+            });
+            applyMediaPayload(payload);
+            setEditorStatus("Вложение заменено и сохранено.", "success");
+        } catch (error) {
+            setEditorStatus(error.message, "error");
+        } finally {
+            hideMediaProgress();
+            setMediaBusy(false);
+        }
+    }
+
+    function askConfirmation(message) {
+        return new Promise((resolve) => {
+            if (telegram?.showConfirm) {
+                telegram.showConfirm(message, resolve);
+                return;
+            }
+            resolve(window.confirm(message));
+        });
+    }
+
+    async function deleteMediaItem(mediaId) {
+        if (state.editorMediaBusy) {
+            return;
+        }
+        const confirmed = await askConfirmation(
+            "Удалить вложение из публикации? Файл в хранилище также будет удалён.",
+        );
+        if (!confirmed) {
+            return;
+        }
+        setMediaBusy(true);
         try {
             const response = await fetch(
-                `/api/publications/${
-                    publicationId
-                }/media`,
+                `/api/publications/${state.editorPublicationId}/media/${mediaId}`
+                + `?expected_version=${state.editorVersion}`,
                 {
+                    method: "DELETE",
                     headers: getAuthHeaders(),
                 },
             );
-
-            if (!response.ok) {
-                const payload =
-                    await response.json();
-                throw new Error(
-                    payload.detail
-                    || (
-                        "Не удалось загрузить "
-                        + "вложение."
-                    ),
-                );
-            }
-
-            const blob = await response.blob();
-            const objectUrl =
-                URL.createObjectURL(blob);
-
-            state.mediaObjectUrl = objectUrl;
-
-            const media = (
-                contentType === "video"
-                    ? document.createElement(
-                        "video",
-                    )
-                    : document.createElement(
-                        "img",
-                    )
-            );
-
-            media.src = objectUrl;
-            media.className =
-                "editor-media-element";
-
-            if (contentType === "video") {
-                media.controls = true;
-                media.playsInline = true;
-                media.preload = "metadata";
-            } else {
-                media.alt = (
-                    "Вложение публикации"
-                );
-            }
-
-            editorMedia.append(media);
-            editorMedia.hidden = false;
+            applyMediaPayload(await parseJsonResponse(response));
+            setEditorStatus("Вложение удалено.", "success");
         } catch (error) {
-            setEditorStatus(
-                error instanceof Error
-                    ? error.message
-                    : (
-                        "Не удалось загрузить "
-                        + "вложение."
-                    ),
-                "error",
-            );
+            setEditorStatus(error.message, "error");
+        } finally {
+            setMediaBusy(false);
         }
     }
+
+    async function saveMediaOrder(mediaIds) {
+        const current = state.editorMediaItems.map((item) => item.id);
+        if (
+            mediaIds.length !== current.length
+            || mediaIds.every((mediaId, index) => mediaId === current[index])
+            || state.editorMediaBusy
+        ) {
+            renderMediaManager();
+            return;
+        }
+        setMediaBusy(true);
+        try {
+            const response = await fetch(
+                `/api/publications/${state.editorPublicationId}/media/order`,
+                {
+                    method: "PATCH",
+                    headers: getAuthHeaders(true),
+                    body: JSON.stringify({
+                        expected_version: state.editorVersion,
+                        media_ids: mediaIds,
+                    }),
+                },
+            );
+            applyMediaPayload(await parseJsonResponse(response));
+            setEditorStatus("Порядок вложений сохранён.", "success");
+        } catch (error) {
+            renderMediaManager();
+            setEditorStatus(error.message, "error");
+        } finally {
+            setMediaBusy(false);
+        }
+    }
+
+    async function saveMediaOptions({
+        mediaId = null,
+        hasSpoiler = null,
+        showCaptionAbove = null,
+    }) {
+        if (state.editorMediaBusy) {
+            return;
+        }
+        const previousCaptionAbove = state.editorShowCaptionAbove;
+        if (showCaptionAbove !== null) {
+            state.editorShowCaptionAbove = showCaptionAbove;
+        }
+        setMediaBusy(true);
+        try {
+            const response = await fetch(
+                `/api/publications/${state.editorPublicationId}/media/options`,
+                {
+                    method: "PATCH",
+                    headers: getAuthHeaders(true),
+                    body: JSON.stringify({
+                        expected_version: state.editorVersion,
+                        media_id: mediaId,
+                        has_spoiler: hasSpoiler,
+                        show_caption_above_media: showCaptionAbove,
+                    }),
+                },
+            );
+            const payload = await parseJsonResponse(response);
+            if (showCaptionAbove !== null) {
+                payload.show_caption_above_media = showCaptionAbove;
+            }
+            applyMediaPayload(payload);
+            setEditorStatus("Параметры вложений сохранены.", "success");
+        } catch (error) {
+            state.editorShowCaptionAbove = previousCaptionAbove;
+            renderMediaManager();
+            setEditorStatus(error.message, "error");
+        } finally {
+            setMediaBusy(false);
+        }
+    }
+
+    function makeMediaActionButton(text, title, callback, kind = "") {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "media-action-button";
+        button.textContent = text;
+        button.title = title;
+        if (kind) {
+            button.dataset.kind = kind;
+        }
+        button.addEventListener("click", callback);
+        return button;
+    }
+
+    function createMediaCard(item, index, renderToken) {
+        const card = document.createElement("article");
+        card.className = "media-card";
+        card.dataset.mediaId = String(item.id);
+        card.draggable = true;
+
+        const handle = document.createElement("button");
+        handle.type = "button";
+        handle.className = "media-drag-handle";
+        handle.textContent = "⠿";
+        handle.title = "Перетащить вложение";
+        handle.setAttribute("aria-label", `Перетащить вложение ${index + 1}`);
+
+        const thumb = document.createElement("div");
+        thumb.className = "media-thumb";
+        const placeholder = document.createElement("span");
+        placeholder.className = "media-thumb-placeholder";
+        placeholder.textContent = "Загрузка…";
+        thumb.append(placeholder);
+
+        const positionBadge = document.createElement("span");
+        positionBadge.className = "media-position-badge";
+        positionBadge.textContent = `#${index + 1}`;
+        thumb.append(positionBadge);
+        if (item.has_spoiler) {
+            const spoilerBadge = document.createElement("span");
+            spoilerBadge.className = "media-spoiler-badge";
+            spoilerBadge.textContent = "Спойлер";
+            thumb.append(spoilerBadge);
+        }
+
+        const body = document.createElement("div");
+        body.className = "media-card-body";
+        const heading = document.createElement("div");
+        heading.className = "media-card-heading";
+        const title = document.createElement("strong");
+        title.className = "media-card-title";
+        title.textContent = item.original_filename;
+        title.title = item.original_filename;
+        heading.append(title);
+
+        const meta = document.createElement("p");
+        meta.className = "media-card-meta";
+        meta.textContent = `${item.media_type === "video" ? "Видео" : "Фото"} · ${formatFileSize(item.file_size)}`;
+
+        const order = document.createElement("div");
+        order.className = "media-card-order";
+        const up = makeMediaActionButton("↑", "Переместить выше", () => {
+            const ids = state.editorMediaItems.map((media) => media.id);
+            const currentIndex = ids.indexOf(item.id);
+            if (currentIndex > 0) {
+                [ids[currentIndex - 1], ids[currentIndex]] = [
+                    ids[currentIndex],
+                    ids[currentIndex - 1],
+                ];
+                saveMediaOrder(ids);
+            }
+        });
+        up.dataset.boundaryDisabled = String(index === 0);
+        up.disabled = index === 0;
+        const down = makeMediaActionButton("↓", "Переместить ниже", () => {
+            const ids = state.editorMediaItems.map((media) => media.id);
+            const currentIndex = ids.indexOf(item.id);
+            if (currentIndex < ids.length - 1) {
+                [ids[currentIndex], ids[currentIndex + 1]] = [
+                    ids[currentIndex + 1],
+                    ids[currentIndex],
+                ];
+                saveMediaOrder(ids);
+            }
+        });
+        down.dataset.boundaryDisabled = String(
+            index === state.editorMediaItems.length - 1,
+        );
+        down.disabled = index === state.editorMediaItems.length - 1;
+        const position = document.createElement("select");
+        position.className = "media-position-select";
+        position.setAttribute("aria-label", `Позиция вложения ${index + 1}`);
+        state.editorMediaItems.forEach((_, positionIndex) => {
+            const option = document.createElement("option");
+            option.value = String(positionIndex + 1);
+            option.textContent = `№ ${positionIndex + 1}`;
+            option.selected = positionIndex === index;
+            position.append(option);
+        });
+        position.addEventListener("change", () => {
+            const ids = state.editorMediaItems.map((media) => media.id);
+            const from = ids.indexOf(item.id);
+            const to = Number(position.value) - 1;
+            ids.splice(to, 0, ids.splice(from, 1)[0]);
+            saveMediaOrder(ids);
+        });
+        order.append(up, down, position);
+
+        const actions = document.createElement("div");
+        actions.className = "media-card-actions";
+        const replaceInput = document.createElement("input");
+        replaceInput.type = "file";
+        replaceInput.accept = "image/jpeg,image/png,video/mp4";
+        replaceInput.hidden = true;
+        replaceInput.addEventListener("change", () => {
+            const [file] = replaceInput.files || [];
+            replaceMediaFile(item.id, file);
+            replaceInput.value = "";
+        });
+        const replace = makeMediaActionButton("Заменить", "Заменить файл", () => {
+            replaceInput.click();
+        });
+        const remove = makeMediaActionButton(
+            "Удалить",
+            "Удалить вложение",
+            () => deleteMediaItem(item.id),
+            "danger",
+        );
+        const spoilerLabel = document.createElement("label");
+        spoilerLabel.className = "media-inline-option";
+        const spoiler = document.createElement("input");
+        spoiler.type = "checkbox";
+        spoiler.checked = Boolean(item.has_spoiler);
+        spoiler.addEventListener("change", () => {
+            saveMediaOptions({ mediaId: item.id, hasSpoiler: spoiler.checked });
+        });
+        spoilerLabel.append(spoiler, document.createTextNode("Спойлер"));
+        actions.append(replaceInput, replace, remove, spoilerLabel);
+
+        body.append(heading, meta, order, actions);
+        card.append(handle, thumb, body);
+
+        card.addEventListener("dragstart", (event) => {
+            state.draggedMediaId = item.id;
+            card.dataset.dragging = "true";
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", String(item.id));
+        });
+        card.addEventListener("dragover", (event) => {
+            event.preventDefault();
+            const dragged = editorMediaList.querySelector(
+                `[data-media-id="${state.draggedMediaId}"]`,
+            );
+            if (positionMediaCard(dragged, card, event.clientY)) {
+                card.dataset.dragTarget = "true";
+            }
+        });
+        card.addEventListener("dragleave", () => {
+            delete card.dataset.dragTarget;
+        });
+        card.addEventListener("drop", (event) => {
+            event.preventDefault();
+            delete card.dataset.dragTarget;
+        });
+        card.addEventListener("dragend", () => {
+            delete card.dataset.dragging;
+            for (const target of editorMediaList.querySelectorAll("[data-drag-target]")) {
+                delete target.dataset.dragTarget;
+            }
+            state.draggedMediaId = null;
+            saveMediaOrder(mediaOrderFromDom());
+        });
+
+        handle.addEventListener("pointerdown", (event) => {
+            if (event.pointerType === "mouse") {
+                return;
+            }
+            event.preventDefault();
+            state.pointerDragMediaId = item.id;
+            state.pointerDragChanged = false;
+            card.dataset.dragging = "true";
+            handle.setPointerCapture?.(event.pointerId);
+        });
+        handle.addEventListener("pointermove", (event) => {
+            if (state.pointerDragMediaId !== item.id) {
+                return;
+            }
+            event.preventDefault();
+            const target = document.elementFromPoint(event.clientX, event.clientY)
+                ?.closest(".media-card");
+            if (target && positionMediaCard(card, target, event.clientY)) {
+                state.pointerDragChanged = true;
+            }
+        });
+        const finishPointerDrag = (event) => {
+            if (state.pointerDragMediaId !== item.id) {
+                return;
+            }
+            handle.releasePointerCapture?.(event.pointerId);
+            delete card.dataset.dragging;
+            state.pointerDragMediaId = null;
+            if (state.pointerDragChanged) {
+                saveMediaOrder(mediaOrderFromDom());
+            }
+            state.pointerDragChanged = false;
+        };
+        handle.addEventListener("pointerup", finishPointerDrag);
+        handle.addEventListener("pointercancel", finishPointerDrag);
+
+        fetchMediaObjectUrl(item, renderToken)
+            .then((objectUrl) => {
+                if (!objectUrl || renderToken !== state.editorMediaRenderToken) {
+                    return;
+                }
+                const mediaElement = createMediaElement(item, objectUrl);
+                const updateTechnicalMeta = () => {
+                    const dimensions = (
+                        item.media_type === "video"
+                            ? (
+                                mediaElement.videoWidth && mediaElement.videoHeight
+                                    ? `${mediaElement.videoWidth}×${mediaElement.videoHeight}`
+                                    : ""
+                            )
+                            : (
+                                mediaElement.naturalWidth && mediaElement.naturalHeight
+                                    ? `${mediaElement.naturalWidth}×${mediaElement.naturalHeight}`
+                                    : ""
+                            )
+                    );
+                    const duration = (
+                        item.media_type === "video" && Number.isFinite(mediaElement.duration)
+                            ? `${Math.floor(mediaElement.duration / 60)}:${pad(
+                                Math.floor(mediaElement.duration % 60),
+                            )}`
+                            : ""
+                    );
+                    meta.textContent = [
+                        item.media_type === "video" ? "Видео" : "Фото",
+                        formatFileSize(item.file_size),
+                        dimensions,
+                        duration,
+                    ].filter(Boolean).join(" · ");
+                };
+                mediaElement.addEventListener(
+                    item.media_type === "video" ? "loadedmetadata" : "load",
+                    updateTechnicalMeta,
+                    { once: true },
+                );
+                placeholder.replaceWith(mediaElement);
+                renderTelegramMediaPreview();
+            })
+            .catch((error) => {
+                placeholder.textContent = "Превью недоступно";
+                placeholder.title = error.message;
+            });
+
+        return card;
+    }
+
+    function renderMediaManager() {
+        state.editorMediaRenderToken += 1;
+        const renderToken = state.editorMediaRenderToken;
+        revokeEditorMediaUrls();
+        editorMediaList.replaceChildren();
+        editorMediaCount.textContent = (
+            `${state.editorMediaItems.length} / ${state.editorMediaMaxItems}`
+        );
+        editorShowCaptionAbove.checked = state.editorShowCaptionAbove;
+
+        if (!state.editorMediaItems.length) {
+            const empty = document.createElement("p");
+            empty.className = "media-empty-state";
+            empty.textContent = (
+                "Вложений нет. Добавьте фото или видео, и текстовая публикация "
+                + "автоматически станет медиапубликацией."
+            );
+            editorMediaList.append(empty);
+        } else {
+            state.editorMediaItems.forEach((item, index) => {
+                editorMediaList.append(createMediaCard(item, index, renderToken));
+            });
+        }
+
+        renderTelegramMediaPreview();
+        setMediaBusy(state.editorMediaBusy);
+    }
+
 
     function closeEditor({ force = false } = {}) {
         if (!force && state.editorDirty) {
@@ -912,7 +1641,7 @@
         );
         state.editorPublicationId = null;
         state.editorVersion = 1;
-        clearEditorMedia();
+        resetEditorMedia();
         editorHistory.hidden = true;
         editorHistoryList.replaceChildren();
         richEditor.setDocument("", []);
@@ -944,7 +1673,7 @@
         setEditorStatus(
             "Загружаем публикацию…",
         );
-        clearEditorMedia();
+        resetEditorMedia();
 
         try {
             const response = await fetch(
@@ -972,16 +1701,22 @@
                 );
             }
 
-            editorType.value =
-                payload.content_type_label;
-            state.editorContentType = payload.content_type;
-            state.editorVersion = payload.version;
-            editorVersion.textContent = `Версия ${payload.version}`;
-            richEditor.setLimit(
-                payload.content_type === "text"
-                    ? 4096
-                    : 1024,
+            state.editorMediaMaxItems = payload.media_max_items || 10;
+            state.editorPhotoMaxBytes = (
+                payload.media_photo_max_bytes || 10 * 1024 * 1024
             );
+            state.editorVideoMaxBytes = (
+                payload.media_video_max_bytes || 50 * 1024 * 1024
+            );
+            updateEditorContentType(payload.content_type);
+            updateEditorVersion(payload.version);
+            state.editorMediaItems = [...(payload.media || [])].sort(
+                (left, right) => left.position - right.position,
+            );
+            state.editorShowCaptionAbove = Boolean(
+                payload.show_caption_above_media,
+            );
+            renderMediaManager();
             richEditor.setDocument(
                 payload.text || "",
                 payload.text_entities || [],
@@ -1019,12 +1754,6 @@
             setEditorDirty(false);
             editorSave.disabled = false;
 
-            if (payload.has_media) {
-                await loadEditorMedia(
-                    publicationId,
-                    payload.content_type,
-                );
-            }
         } catch (error) {
             setEditorStatus(
                 error instanceof Error
@@ -1114,6 +1843,8 @@
                                     }:00`,
                                 ),
                             ),
+                        show_caption_above_media:
+                            editorShowCaptionAbove.checked,
                     }),
                 },
             );
@@ -1221,6 +1952,29 @@
         "change",
         () => setEditorDirty(true),
     );
+
+    editorMediaAdd.addEventListener("click", () => {
+        if (!state.editorMediaBusy) {
+            editorMediaInput.click();
+        }
+    });
+
+    editorMediaInput.addEventListener("change", () => {
+        addMediaFiles(editorMediaInput.files || []);
+    });
+
+    editorShowCaptionAbove.addEventListener("change", () => {
+        if (!state.editorMediaItems.length) {
+            editorShowCaptionAbove.checked = false;
+            return;
+        }
+        const requestedValue = editorShowCaptionAbove.checked;
+        state.editorShowCaptionAbove = requestedValue;
+        renderTelegramMediaPreview();
+        saveMediaOptions({
+            showCaptionAbove: requestedValue,
+        });
+    });
 
     editorForm.addEventListener(
         "submit",

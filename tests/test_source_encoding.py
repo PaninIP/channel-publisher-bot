@@ -5,6 +5,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SOURCE_DIRECTORIES = (
     PROJECT_ROOT / "app",
     PROJECT_ROOT / "webapp",
+    PROJECT_ROOT / "scripts",
 )
 
 

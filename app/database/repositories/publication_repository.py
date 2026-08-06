@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import (
     Publication,
+    PublicationMedia,
     PublicationStatus,
     PublicationVersion,
 )
@@ -19,18 +20,38 @@ def utc_now_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def build_publication_snapshot(publication: Publication) -> str:
+def build_publication_snapshot(
+    publication: Publication,
+    media_items: list[PublicationMedia] | None = None,
+) -> str:
     payload: dict[str, Any] = {
         "channel_id": publication.channel_id,
         "content_type": publication.content_type,
         "text": publication.text,
         "text_entities_json": publication.text_entities_json,
+        "show_caption_above_media": publication.show_caption_above_media,
         "scheduled_at": (
             publication.scheduled_at.isoformat()
             if publication.scheduled_at is not None
             else None
         ),
     }
+    if media_items is not None:
+        payload["media"] = [
+            {
+                "id": item.id,
+                "media_type": item.media_type,
+                "storage_backend": item.storage_backend,
+                "storage_key": item.storage_key,
+                "telegram_file_id": item.telegram_file_id,
+                "original_filename": item.original_filename,
+                "content_type": item.content_type,
+                "file_size": item.file_size,
+                "position": item.position,
+                "has_spoiler": item.has_spoiler,
+            }
+            for item in media_items
+        ]
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -63,6 +84,22 @@ class PublicationRepository:
         )
 
         self.session.add(publication)
+        await self.session.flush()
+
+        if telegram_file_id and content_type in {"photo", "video"}:
+            self.session.add(
+                PublicationMedia(
+                    publication_id=publication.id,
+                    owner_telegram_id=owner_telegram_id,
+                    media_type=content_type,
+                    storage_backend="telegram",
+                    telegram_file_id=telegram_file_id,
+                    content_type=(
+                        "image/jpeg" if content_type == "photo" else "video/mp4"
+                    ),
+                    position=1,
+                )
+            )
 
         await self.session.commit()
         await self.session.refresh(publication)
@@ -231,8 +268,10 @@ class PublicationRepository:
         text_entities_json: str | None,
         scheduled_at_utc: datetime,
         expected_version: int,
+        show_caption_above_media: bool = False,
+        media_items: list[PublicationMedia] | None = None,
     ) -> int | None:
-        previous_snapshot = build_publication_snapshot(publication)
+        previous_snapshot = build_publication_snapshot(publication, media_items)
         next_version = expected_version + 1
 
         statement = (
@@ -248,6 +287,7 @@ class PublicationRepository:
                 text=text,
                 text_entities_json=text_entities_json,
                 scheduled_at=scheduled_at_utc,
+                show_caption_above_media=show_caption_above_media,
                 error_text=None,
                 version=next_version,
                 updated_at=utc_now_naive(),
@@ -332,6 +372,7 @@ class PublicationRepository:
         publication: Publication,
         *,
         telegram_message_id: int,
+        telegram_message_ids: list[int] | None = None,
     ) -> bool:
         statement = (
             update(Publication)
@@ -343,6 +384,10 @@ class PublicationRepository:
             .values(
                 status=PublicationStatus.PUBLISHED.value,
                 telegram_message_id=telegram_message_id,
+                telegram_message_ids_json=json.dumps(
+                    telegram_message_ids or [telegram_message_id],
+                    separators=(",", ":"),
+                ),
                 published_at=utc_now_naive(),
                 publishing_started_at=None,
                 error_text=None,

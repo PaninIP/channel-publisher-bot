@@ -34,6 +34,13 @@ trap recover_after_error ERR
 
 TIMESTAMP="$(date -u +%Y%m%d-%H%M%S)"
 DATABASE_PATH="${APP_DIR}/data/app.db"
+MEDIA_PATH="${APP_DIR}/data/media"
+
+if [[ -d "${MEDIA_PATH}" ]]; then
+    MEDIA_BACKUP="${BACKUP_DIR}/media-${TIMESTAMP}.tar.gz"
+    tar -C "${APP_DIR}/data" -czf "${MEDIA_BACKUP}" media
+    echo "Media backup: ${MEDIA_BACKUP}"
+fi
 
 if [[ -f "${DATABASE_PATH}" ]]; then
     DATABASE_BACKUP="${BACKUP_DIR}/app-${TIMESTAMP}.db"
@@ -116,6 +123,16 @@ find "${BACKUP_DIR}" \
     -printf '%T@ %p\n' \
     | sort -nr \
     | tail -n +11 \
+    | cut -d' ' -f2- \
+    | xargs -r rm -f
+
+find "${BACKUP_DIR}" \
+    -maxdepth 1 \
+    -type f \
+    -name 'media-*.tar.gz' \
+    -printf '%T@ %p\n' \
+    | sort -nr \
+    | tail -n +6 \
     | cut -d' ' -f2- \
     | xargs -r rm -f
 

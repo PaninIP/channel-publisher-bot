@@ -6,15 +6,20 @@ from html import escape
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 
+from app.config import get_settings
 from app.database.models import PublicationStatus
 from app.database.repositories.channel_repository import (
     ChannelRepository,
+)
+from app.database.repositories.publication_media_repository import (
+    PublicationMediaRepository,
 )
 from app.database.repositories.publication_repository import (
     PublicationRepository,
     utc_now_naive,
 )
 from app.database.session import SessionFactory
+from app.services.media_storage import MediaStorageError
 from app.services.publication_sender import (
     send_publication,
 )
@@ -48,7 +53,6 @@ async def mark_failed(
 ) -> bool:
     async with SessionFactory() as session:
         repository = PublicationRepository(session)
-
         publication = await repository.get_by_id(
             publication_id=publication_id,
             owner_telegram_id=owner_telegram_id,
@@ -71,6 +75,7 @@ async def process_publication(
 ) -> None:
     async with SessionFactory() as session:
         publication_repository = PublicationRepository(session)
+        media_repository = PublicationMediaRepository(session)
         channel_repository = ChannelRepository(session)
 
         publication = await publication_repository.claim_for_publishing(
@@ -115,18 +120,26 @@ async def process_publication(
         text = publication.text
         telegram_file_id = publication.telegram_file_id
         text_entities_json = publication.text_entities_json
+        show_caption_above_media = publication.show_caption_above_media
+        media_items = await media_repository.list_by_publication(
+            publication_id=publication.id,
+            owner_telegram_id=owner_telegram_id,
+        )
 
     try:
-        published_message = await send_publication(
+        send_result = await send_publication(
             bot=bot,
             chat_id=chat_id,
             content_type=content_type,
             text=text,
             telegram_file_id=telegram_file_id,
             text_entities_json=text_entities_json,
+            media_items=media_items,
+            settings=get_settings(),
+            show_caption_above_media=show_caption_above_media,
         )
 
-    except (TelegramAPIError, ValueError) as error:
+    except (TelegramAPIError, MediaStorageError, ValueError) as error:
         logger.exception(
             "Scheduled publication %s failed",
             publication_id,
@@ -155,6 +168,7 @@ async def process_publication(
 
     async with SessionFactory() as session:
         repository = PublicationRepository(session)
+        media_repository = PublicationMediaRepository(session)
 
         publication = await repository.get_by_id(
             publication_id=publication_id,
@@ -162,9 +176,15 @@ async def process_publication(
         )
 
         if publication is not None:
+            await media_repository.cache_telegram_file_ids(
+                publication_id=publication_id,
+                owner_telegram_id=owner_telegram_id,
+                file_ids_by_media_id=send_result.file_ids_by_media_id,
+            )
             recorded = await repository.mark_published(
                 publication,
-                telegram_message_id=published_message.message_id,
+                telegram_message_id=send_result.primary_message.message_id,
+                telegram_message_ids=send_result.message_ids,
             )
 
     if not recorded:
@@ -172,7 +192,7 @@ async def process_publication(
             "Publication %s was sent to Telegram as message %s, "
             "but its database status was not recorded",
             publication_id,
-            published_message.message_id,
+            send_result.primary_message.message_id,
         )
         await notify_owner(
             bot=bot,
@@ -181,7 +201,7 @@ async def process_publication(
                 "⚠️ <b>Пост отправлен, но результат не записан в базу</b>\n\n"
                 f"Публикация: <code>{publication_id}</code>\n"
                 f"Канал: <b>{escape(channel_title)}</b>\n"
-                f"ID сообщения: <code>{published_message.message_id}</code>\n\n"
+                f"ID сообщения: <code>{send_result.primary_message.message_id}</code>\n\n"
                 "Не запускайте повторную отправку до ручной проверки канала."
             ),
         )
@@ -194,7 +214,7 @@ async def process_publication(
             "✅ <b>Запланированный пост опубликован</b>\n\n"
             f"Публикация: <code>{publication_id}</code>\n"
             f"Канал: <b>{escape(channel_title)}</b>\n"
-            f"ID сообщения: <code>{published_message.message_id}</code>"
+            f"ID сообщения: <code>{send_result.primary_message.message_id}</code>"
         ),
     )
 

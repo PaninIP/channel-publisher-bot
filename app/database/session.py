@@ -12,6 +12,7 @@ from app.database.migrations import apply_sqlite_migrations
 from app.database.models import (  # noqa: F401
     Channel,
     Publication,
+    PublicationMedia,
     PublicationVersion,
 )
 
