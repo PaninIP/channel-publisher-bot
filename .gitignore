@@ -10,3 +10,7 @@ data/
 *.session
 *.session-journal
 *.db
+
+backups/
+.deploy/
+.test-venv/

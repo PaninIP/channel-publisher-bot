@@ -3,6 +3,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.services.content_plan_editor import (
+    MEDIA_CAPTION_MAX_LENGTH,
+    TEXT_MAX_LENGTH,
     ContentPlanEditorValidationError,
     normalize_publication_text,
     parse_scheduled_local,
@@ -17,6 +19,29 @@ def test_text_publication_requires_text() -> None:
         )
 
 
+def test_text_publication_accepts_telegram_limit() -> None:
+    text = "x" * TEXT_MAX_LENGTH
+
+    assert (
+        normalize_publication_text(
+            text,
+            content_type="text",
+        )
+        == text
+    )
+
+
+def test_text_publication_rejects_text_above_telegram_limit() -> None:
+    with pytest.raises(
+        ContentPlanEditorValidationError,
+        match="4096",
+    ):
+        normalize_publication_text(
+            "x" * (TEXT_MAX_LENGTH + 1),
+            content_type="text",
+        )
+
+
 def test_media_publication_allows_empty_caption() -> None:
     assert (
         normalize_publication_text(
@@ -25,6 +50,40 @@ def test_media_publication_allows_empty_caption() -> None:
         )
         is None
     )
+
+
+def test_media_publication_accepts_caption_limit() -> None:
+    caption = "x" * MEDIA_CAPTION_MAX_LENGTH
+
+    assert (
+        normalize_publication_text(
+            caption,
+            content_type="video",
+        )
+        == caption
+    )
+
+
+def test_media_publication_rejects_caption_above_limit() -> None:
+    with pytest.raises(
+        ContentPlanEditorValidationError,
+        match="1024",
+    ):
+        normalize_publication_text(
+            "x" * (MEDIA_CAPTION_MAX_LENGTH + 1),
+            content_type="photo",
+        )
+
+
+def test_unknown_content_type_is_rejected() -> None:
+    with pytest.raises(
+        ContentPlanEditorValidationError,
+        match="Неизвестный тип публикации",
+    ):
+        normalize_publication_text(
+            "text",
+            content_type="document",
+        )
 
 
 def test_schedule_is_converted_to_naive_utc() -> None:

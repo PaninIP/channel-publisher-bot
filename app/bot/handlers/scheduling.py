@@ -311,18 +311,19 @@ async def handle_schedule_web_app_data(
             )
             return
 
-        if publication.status == PublicationStatus.PUBLISHED.value:
+        scheduled = await repository.schedule_if_draft(
+            publication_id=publication.id,
+            owner_telegram_id=message.from_user.id,
+            scheduled_at_utc=scheduled_utc,
+        )
+
+        if not scheduled:
             await state.clear()
             await message.answer(
-                text="Публикация уже была отправлена.",
+                text=("Публикация уже была отправлена, запланирована или отменена."),
                 reply_markup=get_main_menu(),
             )
             return
-
-        await repository.schedule(
-            publication,
-            scheduled_at_utc=scheduled_utc,
-        )
 
     await state.clear()
 

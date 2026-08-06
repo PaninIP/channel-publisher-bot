@@ -34,13 +34,13 @@
 
         if (!value) {
             validationElement.textContent =
-                "???????? ???? ? ?????.";
+                "Выберите дату и время.";
             return false;
         }
 
         if (minimumLocal && value < minimumLocal) {
             validationElement.textContent =
-                "????????? ????? ??? ??????.";
+                "Выберите время позже текущего.";
             return false;
         }
 
@@ -57,7 +57,7 @@
             return;
         }
 
-        telegram.MainButton.setText("?????????????");
+        telegram.MainButton.setText("Запланировать");
 
         if (isValid) {
             telegram.MainButton.show();
@@ -80,7 +80,7 @@
 
         if (!telegram) {
             validationElement.textContent =
-                "???????? ???????? ?????? Telegram.";
+                "Откройте приложение внутри Telegram.";
             return;
         }
 

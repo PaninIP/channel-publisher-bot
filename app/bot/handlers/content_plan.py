@@ -57,9 +57,9 @@ def build_content_plan_mini_app_url() -> str:
 
 
 CONTENT_TYPE_LABELS = {
-    PublicationContentType.TEXT.value: "?????",
-    PublicationContentType.PHOTO.value: "??????????",
-    PublicationContentType.VIDEO.value: "?????",
+    PublicationContentType.TEXT.value: "Текст",
+    PublicationContentType.PHOTO.value: "Фотография",
+    PublicationContentType.VIDEO.value: "Видео",
 }
 
 
@@ -99,7 +99,7 @@ def format_scheduled_at(
     local_value = to_local_datetime(value)
 
     if local_value is None:
-        return "????? ?? ???????"
+        return "Время не указано"
 
     if include_year:
         return local_value.strftime("%d.%m.%Y %H:%M")
@@ -113,12 +113,12 @@ def format_content_preview(
     limit: int = 700,
 ) -> str:
     if not publication.text:
-        return "??? ??????"
+        return "Без текста"
 
     preview = publication.text.strip()
 
     if len(preview) > limit:
-        preview = f"{preview[: limit - 1]}?"
+        preview = f"{preview[: limit - 1]}…"
 
     return preview
 
@@ -177,14 +177,14 @@ def build_plan_view(
 ) -> tuple[str, list[tuple[int, str]]]:
     if not items:
         return (
-            "?? <b>???????-????</b>\n\n??????????????? ?????????? ???? ???.",
+            "📅 <b>Контент-план</b>\n\nЗапланированных публикаций пока нет.",
             [],
         )
 
     lines = [
-        "?? <b>???????-????</b>",
+        "📅 <b>Контент-план</b>",
         "",
-        "????????? ??????????????? ??????????:",
+        "Ближайшие запланированные публикации:",
         "",
     ]
     buttons: list[tuple[int, str]] = []
@@ -197,17 +197,17 @@ def build_plan_view(
             publication.scheduled_at,
             include_year=False,
         )
-        channel_title = channel.title if channel is not None else "????? ??????????"
+        channel_title = channel.title if channel is not None else "Удалённый канал"
         content_type = CONTENT_TYPE_LABELS.get(
             publication.content_type,
             publication.content_type,
         )
 
         lines.append(
-            f"{number}. <b>{escape(scheduled_at)}</b> ? "
+            f"{number}. <b>{escape(scheduled_at)}</b> • "
             f"{escape(channel_title)}\n"
-            f"   {escape(content_type)} ? "
-            f"?????????? #{publication.id}"
+            f"   {escape(content_type)} • "
+            f"Публикация #{publication.id}"
         )
 
         short_title = channel_title
@@ -218,7 +218,7 @@ def build_plan_view(
         buttons.append(
             (
                 publication.id,
-                f"?? {scheduled_at} ? {short_title}",
+                f"📅 {scheduled_at} • {short_title}",
             )
         )
 
@@ -229,7 +229,7 @@ def build_publication_details(
     publication: Publication,
     channel: Channel | None,
 ) -> str:
-    channel_title = channel.title if channel is not None else "????? ??????????"
+    channel_title = channel.title if channel is not None else "Удалённый канал"
     content_type = CONTENT_TYPE_LABELS.get(
         publication.content_type,
         publication.content_type,
@@ -241,12 +241,12 @@ def build_publication_details(
     preview = format_content_preview(publication)
 
     return (
-        "?? <b>??????????????? ??????????</b>\n\n"
+        "📝 <b>Запланированная публикация</b>\n\n"
         f"ID: <code>{publication.id}</code>\n"
-        f"?????: <b>{escape(channel_title)}</b>\n"
-        f"??????: {escape(content_type)}\n"
-        f"???? ? ?????: <b>{escape(scheduled_at)}</b>\n\n"
-        "<b>??????????:</b>\n"
+        f"Канал: <b>{escape(channel_title)}</b>\n"
+        f"Формат: {escape(content_type)}\n"
+        f"Дата и время: <b>{escape(scheduled_at)}</b>\n\n"
+        "<b>Содержимое:</b>\n"
         f"{escape(preview)}"
     )
 
@@ -300,7 +300,7 @@ async def handle_content_plan_list(
         text, buttons = build_plan_view(items)
     except ZoneInfoNotFoundError:
         await callback.answer(
-            text="???????????? APP_TIMEZONE",
+            text="Некорректный APP_TIMEZONE",
             show_alert=True,
         )
         return
@@ -324,7 +324,7 @@ async def handle_publication_details(
 
     if publication_id is None:
         await callback.answer(
-            text="???????????? ID ??????????.",
+            text="Некорректный ID публикации.",
             show_alert=True,
         )
         return
@@ -336,7 +336,7 @@ async def handle_publication_details(
 
     if item is None:
         await callback.answer(
-            text="?????????? ?? ???????.",
+            text="Публикация не найдена.",
             show_alert=True,
         )
         return
@@ -345,7 +345,7 @@ async def handle_publication_details(
 
     if publication.status != PublicationStatus.SCHEDULED.value:
         await callback.answer(
-            text=("?????????? ??? ?? ????????? ? ???????."),
+            text=("Публикация уже не находится в плане."),
             show_alert=True,
         )
         return
@@ -357,7 +357,7 @@ async def handle_publication_details(
         )
     except ZoneInfoNotFoundError:
         await callback.answer(
-            text="???????????? APP_TIMEZONE",
+            text="Некорректный APP_TIMEZONE",
             show_alert=True,
         )
         return
@@ -383,7 +383,7 @@ async def handle_publication_preview(
 
     if publication_id is None:
         await callback.answer(
-            text="???????????? ID ??????????.",
+            text="Некорректный ID публикации.",
             show_alert=True,
         )
         return
@@ -395,7 +395,7 @@ async def handle_publication_preview(
 
     if item is None:
         await callback.answer(
-            text="?????????? ?? ???????.",
+            text="Публикация не найдена.",
             show_alert=True,
         )
         return
@@ -404,7 +404,7 @@ async def handle_publication_preview(
 
     if publication.status != PublicationStatus.SCHEDULED.value:
         await callback.answer(
-            text=("?????????? ??? ?? ????????? ? ???????."),
+            text=("Публикация уже не находится в плане."),
             show_alert=True,
         )
         return
@@ -412,7 +412,7 @@ async def handle_publication_preview(
     try:
         if publication.content_type == PublicationContentType.TEXT.value:
             if not publication.text:
-                raise ValueError("? ????????? ?????????? ??????????? ?????.")
+                raise ValueError("У текстовой публикации отсутствует текст.")
 
             await callback.message.answer(
                 text=publication.text,
@@ -421,7 +421,7 @@ async def handle_publication_preview(
 
         elif publication.content_type == PublicationContentType.PHOTO.value:
             if not publication.telegram_file_id:
-                raise ValueError("? ?????????? ??????????? ??????????.")
+                raise ValueError("У публикации отсутствует фотография.")
 
             await callback.message.answer_photo(
                 photo=publication.telegram_file_id,
@@ -431,7 +431,7 @@ async def handle_publication_preview(
 
         elif publication.content_type == PublicationContentType.VIDEO.value:
             if not publication.telegram_file_id:
-                raise ValueError("? ?????????? ??????????? ?????.")
+                raise ValueError("У публикации отсутствует видео.")
 
             await callback.message.answer_video(
                 video=publication.telegram_file_id,
@@ -441,20 +441,20 @@ async def handle_publication_preview(
             )
 
         else:
-            raise ValueError("??????????? ??? ??????????.")
+            raise ValueError("Неизвестный тип публикации.")
 
     except (TelegramAPIError, ValueError) as error:
         await callback.answer(
-            text="?? ??????? ???????? ????????????.",
+            text="Не удалось показать предпросмотр.",
             show_alert=True,
         )
         await callback.message.answer(
-            text=(f"? ?????? ?????????????:\n<code>{escape(str(error)[:500])}</code>"),
+            text=(f"❌ Ошибка предпросмотра:\n<code>{escape(str(error)[:500])}</code>"),
         )
         return
 
     await callback.answer(
-        text="???????????? ?????????.",
+        text="Предпросмотр отправлен.",
     )
 
 
@@ -470,7 +470,7 @@ async def handle_publication_cancel_request(
 
     if publication_id is None:
         await callback.answer(
-            text="???????????? ID ??????????.",
+            text="Некорректный ID публикации.",
             show_alert=True,
         )
         return
@@ -482,7 +482,7 @@ async def handle_publication_cancel_request(
 
     if item is None:
         await callback.answer(
-            text="?????????? ?? ???????.",
+            text="Публикация не найдена.",
             show_alert=True,
         )
         return
@@ -491,19 +491,19 @@ async def handle_publication_cancel_request(
 
     if publication.status != PublicationStatus.SCHEDULED.value:
         await callback.answer(
-            text="??? ?????????? ??? ?????? ????????.",
+            text="Эту публикацию уже нельзя отменить.",
             show_alert=True,
         )
         return
 
-    channel_title = channel.title if channel is not None else "????? ??????????"
+    channel_title = channel.title if channel is not None else "Удалённый канал"
 
     await callback.message.edit_text(
         text=(
-            "?? <b>???????? ???????????</b>\n\n"
-            f"??????????: <code>{publication.id}</code>\n"
-            f"?????: <b>{escape(channel_title)}</b>\n\n"
-            "????? ?????? ???? ?? ????? ???????????."
+            "⚠️ <b>Отмена публикации</b>\n\n"
+            f"Публикация: <code>{publication.id}</code>\n"
+            f"Канал: <b>{escape(channel_title)}</b>\n\n"
+            "После отмены пост не будет опубликован."
         ),
         reply_markup=get_cancel_confirmation_keyboard(
             publication.id,
@@ -524,7 +524,7 @@ async def handle_publication_cancel_confirm(
 
     if publication_id is None:
         await callback.answer(
-            text="???????????? ID ??????????.",
+            text="Некорректный ID публикации.",
             show_alert=True,
         )
         return
@@ -539,28 +539,32 @@ async def handle_publication_cancel_confirm(
 
         if publication is None:
             await callback.answer(
-                text="?????????? ?? ???????.",
+                text="Публикация не найдена.",
                 show_alert=True,
             )
             return
 
-        if publication.status != PublicationStatus.SCHEDULED.value:
+        cancelled = await repository.cancel_if_allowed(
+            publication_id=publication.id,
+            owner_telegram_id=callback.from_user.id,
+            allowed_statuses={PublicationStatus.SCHEDULED.value},
+        )
+
+        if not cancelled:
             await callback.answer(
-                text=("?????????? ??? ?????????????? ??? ???? ????????."),
+                text="Публикацию уже нельзя отменить.",
                 show_alert=True,
             )
             return
-
-        await repository.mark_cancelled(publication)
 
     await callback.message.edit_text(
         text=(
-            "? <b>?????????? ????????</b>\n\n"
-            f"???? #{publication_id} ?????? "
-            "?? ??????? ? ??????????? ?? ?????."
+            "✅ <b>Публикация отменена</b>\n\n"
+            f"Пост #{publication_id} удалён "
+            "из плана и не будет опубликован."
         ),
         reply_markup=get_back_to_plan_keyboard(),
     )
     await callback.answer(
-        text="?????????? ????????.",
+        text="Публикация отменена.",
     )

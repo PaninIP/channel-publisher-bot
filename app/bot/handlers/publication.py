@@ -1,3 +1,4 @@
+import logging
 from html import escape
 
 from aiogram import Bot, F, Router
@@ -32,9 +33,15 @@ from app.database.repositories.publication_repository import (
     PublicationRepository,
 )
 from app.database.session import SessionFactory
+from app.services.content_plan_editor import (
+    ContentPlanEditorValidationError,
+    normalize_publication_text,
+)
 from app.services.publication_sender import (
     send_publication,
 )
+
+logger = logging.getLogger(__name__)
 
 router = Router(name=__name__)
 
@@ -125,25 +132,13 @@ def validate_content(
     content_type: str,
     text: str | None,
 ) -> str | None:
-    if content_type == PublicationContentType.TEXT.value:
-        if not text:
-            return "Текст публикации не должен быть пустым."
-
-        if len(text) > 4096:
-            return "Текст слишком длинный. Максимальная длина — 4096 символов."
-        if (
-            content_type
-            in {
-                PublicationContentType.PHOTO.value,
-                PublicationContentType.VIDEO.value,
-            }
-            and text
-            and len(text) > 1024
-        ):
-            return (
-                "Подпись к фото или видео слишком длинная. "
-                "Максимальная длина — 1024 символа."
-            )
+    try:
+        normalize_publication_text(
+            text,
+            content_type=content_type,
+        )
+    except ContentPlanEditorValidationError as error:
+        return str(error)
 
     return None
 
@@ -492,22 +487,6 @@ async def handle_post_publish(
         await callback.answer()
         return
 
-    channel = await get_owner_channel(
-        channel_id=channel_id,
-        owner_telegram_id=callback.from_user.id,
-    )
-
-    if channel is None:
-        await state.clear()
-
-        await callback.message.answer(
-            text="❌ Выбранный канал больше недоступен.",
-            reply_markup=get_main_menu(),
-        )
-
-        await callback.answer()
-        return
-
     async with SessionFactory() as session:
         publication_repository = PublicationRepository(session)
 
@@ -527,21 +506,67 @@ async def handle_post_publish(
             await callback.answer()
             return
 
-        if publication.status == PublicationStatus.PUBLISHED.value:
+        claimed_publication = await publication_repository.claim_for_publishing(
+            publication_id=publication.id,
+            owner_telegram_id=callback.from_user.id,
+            expected_status=PublicationStatus.DRAFT.value,
+        )
+
+        if claimed_publication is None:
+            current_publication = await publication_repository.get_by_id(
+                publication_id=publication_id,
+                owner_telegram_id=callback.from_user.id,
+            )
+            current_status = (
+                current_publication.status if current_publication is not None else None
+            )
+
+            status_messages = {
+                PublicationStatus.PUBLISHED.value: "Пост уже опубликован.",
+                PublicationStatus.PUBLISHING.value: "Публикация уже выполняется.",
+                PublicationStatus.SCHEDULED.value: "Публикация уже запланирована.",
+                PublicationStatus.CANCELLED.value: "Публикация уже отменена.",
+                PublicationStatus.FAILED.value: (
+                    "Предыдущая попытка завершилась ошибкой. "
+                    "Создайте публикацию заново."
+                ),
+            }
+
             await callback.answer(
-                text="Пост уже опубликован.",
+                text=status_messages.get(
+                    current_status,
+                    "Не удалось начать публикацию.",
+                ),
                 show_alert=True,
             )
             return
 
-        if publication.status == PublicationStatus.PUBLISHING.value:
-            await callback.answer(
-                text="Публикация уже выполняется.",
-                show_alert=True,
-            )
-            return
+        publication = claimed_publication
+        content_type = publication.content_type
+        text = publication.text
+        telegram_file_id = publication.telegram_file_id
+        channel_id = publication.channel_id
 
-        await publication_repository.mark_publishing(publication)
+    channel = await get_owner_channel(
+        channel_id=channel_id,
+        owner_telegram_id=callback.from_user.id,
+    )
+
+    if channel is None:
+        await mark_publication_failed(
+            publication_id=publication_id,
+            owner_telegram_id=callback.from_user.id,
+            error_text="Выбранный канал больше недоступен.",
+        )
+        await state.clear()
+
+        await callback.message.answer(
+            text="❌ Выбранный канал больше недоступен.",
+            reply_markup=get_main_menu(),
+        )
+
+        await callback.answer()
+        return
 
     try:
         published_message = await send_publication(
@@ -618,6 +643,8 @@ async def handle_post_publish(
         )
         return
 
+    recorded = False
+
     async with SessionFactory() as session:
         publication_repository = PublicationRepository(session)
 
@@ -627,12 +654,33 @@ async def handle_post_publish(
         )
 
         if publication is not None:
-            await publication_repository.mark_published(
+            recorded = await publication_repository.mark_published(
                 publication,
                 telegram_message_id=(published_message.message_id),
             )
 
     await state.clear()
+
+    if not recorded:
+        logger.critical(
+            "Publication %s was sent as Telegram message %s, "
+            "but its database status was not recorded",
+            publication_id,
+            published_message.message_id,
+        )
+        await callback.message.answer(
+            text=(
+                "⚠️ Пост отправлен, но результат не записан в базу.\n\n"
+                f"ID сообщения: <code>{published_message.message_id}</code>\n"
+                "Не повторяйте отправку до ручной проверки канала."
+            ),
+            reply_markup=get_main_menu(),
+        )
+        await callback.answer(
+            text="Проверьте канал вручную",
+            show_alert=True,
+        )
+        return
 
     await callback.message.edit_reply_markup(
         reply_markup=None,

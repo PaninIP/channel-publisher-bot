@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
+from sqlalchemy import select
 from fastapi import (
     FastAPI,
     Header,
@@ -249,7 +250,19 @@ async def content_plan_page() -> FileResponse:
     include_in_schema=False,
 )
 async def health() -> dict[str, str]:
-    return {"status": "ok"}
+    try:
+        async with SessionFactory() as session:
+            await session.execute(select(Publication.id).limit(1))
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="База данных недоступна.",
+        ) from error
+
+    return {
+        "status": "ok",
+        "database": "ok",
+    }
 
 
 @app.get("/api/content-plan")
@@ -468,12 +481,21 @@ async def update_publication(
                 detail=str(error),
             ) from error
 
-        await publication_repository.update_scheduled(
+        updated = await publication_repository.update_scheduled(
             publication,
             channel_id=channel.id,
             text=normalized_text,
             scheduled_at_utc=(scheduled_at_utc),
         )
+
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Публикация уже отправляется, была отменена "
+                    "или больше недоступна для редактирования."
+                ),
+            )
 
     return {
         "status": "updated",
