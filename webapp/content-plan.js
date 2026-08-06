@@ -90,6 +90,12 @@
         video: "▶",
     };
 
+    const deviceTimezone = (
+        Intl.DateTimeFormat()
+            .resolvedOptions()
+            .timeZone || ""
+    ).trim();
+
     const state = {
         currentMonth: new Date(
             new Date().getFullYear(),
@@ -98,7 +104,7 @@
         ),
         selectedDay: null,
         items: [],
-        timezone: "—",
+        timezone: deviceTimezone,
         loading: false,
         editorPublicationId: null,
         editorLoading: false,
@@ -107,6 +113,69 @@
 
     function pad(value) {
         return String(value).padStart(2, "0");
+    }
+
+    function formatLocalDateTime(date) {
+        return [
+            date.getFullYear(),
+            "-",
+            pad(date.getMonth() + 1),
+            "-",
+            pad(date.getDate()),
+            "T",
+            pad(date.getHours()),
+            ":",
+            pad(date.getMinutes()),
+        ].join("");
+    }
+
+    function getNextAvailableMinute() {
+        const nextMinute = new Date();
+        nextMinute.setSeconds(0, 0);
+        nextMinute.setMinutes(
+            nextMinute.getMinutes() + 1,
+        );
+        return nextMinute;
+    }
+
+    function getTimezoneOffsetMinutes(date) {
+        return -date.getTimezoneOffset();
+    }
+
+    function formatTimezoneLabel(date = new Date()) {
+        const offsetMinutes =
+            getTimezoneOffsetMinutes(date);
+        const sign = offsetMinutes >= 0 ? "+" : "-";
+        const absoluteMinutes = Math.abs(offsetMinutes);
+        const hours = Math.floor(absoluteMinutes / 60);
+        const minutes = absoluteMinutes % 60;
+        const offset = (
+            `UTC${sign}${pad(hours)}:${pad(minutes)}`
+        );
+
+        return state.timezone
+            ? `${state.timezone} (${offset})`
+            : offset;
+    }
+
+    function refreshEditorMinimum(
+        { forceValue = false } = {},
+    ) {
+        const minimum = formatLocalDateTime(
+            getNextAvailableMinute(),
+        );
+
+        editorScheduledAt.min = minimum;
+
+        if (
+            forceValue
+            || !editorScheduledAt.value
+            || editorScheduledAt.value < minimum
+        ) {
+            editorScheduledAt.value = minimum;
+        }
+
+        return minimum;
     }
 
     function getMonthKey(date) {
@@ -473,6 +542,10 @@
             const response = await fetch(
                 `/api/content-plan?month=${
                     encodeURIComponent(monthKey)
+                }&timezone=${
+                    encodeURIComponent(state.timezone)
+                }&timezone_offset_minutes=${
+                    getTimezoneOffsetMinutes(new Date())
                 }`,
                 {
                     headers: getAuthHeaders(),
@@ -492,7 +565,7 @@
             state.items = payload.items;
             state.timezone = payload.timezone;
             timezoneName.textContent =
-                state.timezone;
+                formatTimezoneLabel();
 
             renderCalendar();
             renderSelectedDay();
@@ -645,6 +718,10 @@
             const response = await fetch(
                 `/api/publications/${
                     publicationId
+                }?timezone=${
+                    encodeURIComponent(state.timezone)
+                }&timezone_offset_minutes=${
+                    getTimezoneOffsetMinutes(new Date())
                 }`,
                 {
                     headers: getAuthHeaders(),
@@ -672,8 +749,12 @@
                     ? 4096
                     : 1024
             );
-            editorScheduledAt.value =
-                payload.scheduled_local;
+            const minimum = refreshEditorMinimum();
+            editorScheduledAt.value = (
+                payload.scheduled_local >= minimum
+                    ? payload.scheduled_local
+                    : minimum
+            );
 
             editorChannel.replaceChildren();
 
@@ -731,6 +812,20 @@
             return;
         }
 
+        const minimum = refreshEditorMinimum();
+
+        if (
+            !editorScheduledAt.value
+            || editorScheduledAt.value < minimum
+        ) {
+            setEditorStatus(
+                "Ближайшее доступное время — следующая минута.",
+                "error",
+            );
+            editorScheduledAt.reportValidity();
+            return;
+        }
+
         state.editorLoading = true;
         editorSave.disabled = true;
         setEditorStatus(
@@ -757,6 +852,14 @@
                             .value
                         ),
                         timezone: state.timezone,
+                        timezone_offset_minutes:
+                            getTimezoneOffsetMinutes(
+                                new Date(
+                                    `${
+                                        editorScheduledAt.value
+                                    }:00`,
+                                ),
+                            ),
                     }),
                 },
             );
@@ -861,6 +964,13 @@
             },
         );
     }
+
+    timezoneName.textContent = formatTimezoneLabel();
+    refreshEditorMinimum();
+    window.setInterval(
+        () => refreshEditorMinimum(),
+        15_000,
+    );
 
     loadMonth();
 })();

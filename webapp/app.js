@@ -12,24 +12,78 @@
         "fallback-submit",
     );
 
-    const params = new URLSearchParams(
-        window.location.search,
-    );
-
     const timezone = (
-        params.get("timezone") || "Europe/Moscow"
+        Intl.DateTimeFormat()
+            .resolvedOptions()
+            .timeZone || ""
     ).trim();
 
-    const minimumLocal = params.get("min_local") || "";
+    function pad(value) {
+        return String(value).padStart(2, "0");
+    }
 
-    timezoneElement.textContent = timezone;
+    function formatLocalDateTime(date) {
+        return [
+            date.getFullYear(),
+            "-",
+            pad(date.getMonth() + 1),
+            "-",
+            pad(date.getDate()),
+            "T",
+            pad(date.getHours()),
+            ":",
+            pad(date.getMinutes()),
+        ].join("");
+    }
 
-    if (minimumLocal) {
-        input.min = minimumLocal;
-        input.value = minimumLocal;
+    function getNextAvailableMinute() {
+        const nextMinute = new Date();
+        nextMinute.setSeconds(0, 0);
+        nextMinute.setMinutes(
+            nextMinute.getMinutes() + 1,
+        );
+        return nextMinute;
+    }
+
+    function getTimezoneOffsetMinutes(date) {
+        return -date.getTimezoneOffset();
+    }
+
+    function formatTimezoneLabel(date) {
+        const offsetMinutes = getTimezoneOffsetMinutes(date);
+        const sign = offsetMinutes >= 0 ? "+" : "-";
+        const absoluteMinutes = Math.abs(offsetMinutes);
+        const hours = Math.floor(absoluteMinutes / 60);
+        const minutes = absoluteMinutes % 60;
+        const offset = (
+            `UTC${sign}${pad(hours)}:${pad(minutes)}`
+        );
+
+        return timezone
+            ? `${timezone} (${offset})`
+            : offset;
+    }
+
+    function refreshMinimum({ forceValue = false } = {}) {
+        const minimum = formatLocalDateTime(
+            getNextAvailableMinute(),
+        );
+
+        input.min = minimum;
+
+        if (
+            forceValue
+            || !input.value
+            || input.value < minimum
+        ) {
+            input.value = minimum;
+        }
+
+        return minimum;
     }
 
     function selectedValueIsValid() {
+        const minimum = refreshMinimum();
         const value = input.value;
 
         if (!value) {
@@ -38,9 +92,11 @@
             return false;
         }
 
-        if (minimumLocal && value < minimumLocal) {
-            validationElement.textContent =
-                "Выберите время позже текущего.";
+        if (value < minimum) {
+            validationElement.textContent = (
+                "Ближайшее доступное время — "
+                + "следующая минута."
+            );
             return false;
         }
 
@@ -72,10 +128,15 @@
             return;
         }
 
+        const selectedDate = new Date(
+            `${input.value}:00`,
+        );
         const payload = JSON.stringify({
             action: "schedule_publication",
             scheduled_local: input.value,
             timezone,
+            timezone_offset_minutes:
+                getTimezoneOffsetMinutes(selectedDate),
         });
 
         if (!telegram) {
@@ -87,6 +148,11 @@
         telegram.sendData(payload);
         telegram.close();
     }
+
+    timezoneElement.textContent = formatTimezoneLabel(
+        new Date(),
+    );
+    refreshMinimum({ forceValue: true });
 
     input.addEventListener("change", updateControls);
     input.addEventListener("input", updateControls);
@@ -102,5 +168,6 @@
         telegram.MainButton.onClick(submit);
     }
 
+    window.setInterval(updateControls, 15_000);
     updateControls();
 })();

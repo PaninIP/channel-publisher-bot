@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone as fixed_timezone, tzinfo
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -74,8 +74,13 @@ class PublicationUpdateRequest(BaseModel):
         max_length=32,
     )
     timezone: str = Field(
-        min_length=1,
+        default="",
         max_length=64,
+    )
+    timezone_offset_minutes: int | None = Field(
+        default=None,
+        ge=-(14 * 60),
+        le=14 * 60,
     )
 
 
@@ -112,22 +117,58 @@ def authenticate_telegram_user(
         ) from error
 
 
-def get_application_timezone(
+def format_timezone_offset(timezone_offset_minutes: int) -> str:
+    sign = "+" if timezone_offset_minutes >= 0 else "-"
+    absolute_minutes = abs(timezone_offset_minutes)
+    hours, minutes = divmod(absolute_minutes, 60)
+    return f"UTC{sign}{hours:02d}:{minutes:02d}"
+
+
+def get_requested_timezone(
+    timezone_name: str | None,
+    timezone_offset_minutes: int | None,
+    *,
     settings: Settings,
-) -> ZoneInfo:
-    try:
-        return ZoneInfo(settings.app_timezone.strip())
-    except ZoneInfoNotFoundError as error:
+) -> tuple[tzinfo, str]:
+    requested_timezone = (timezone_name or "").strip()
+
+    if requested_timezone:
+        try:
+            return ZoneInfo(requested_timezone), requested_timezone
+        except ZoneInfoNotFoundError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Устройство передало неизвестный часовой пояс.",
+            ) from error
+
+    if timezone_offset_minutes is None:
+        fallback_timezone = settings.app_timezone.strip()
+
+        try:
+            return ZoneInfo(fallback_timezone), fallback_timezone
+        except ZoneInfoNotFoundError as error:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="На сервере некорректно настроен APP_TIMEZONE.",
+            ) from error
+
+    if not -(14 * 60) <= timezone_offset_minutes <= 14 * 60:
         raise HTTPException(
-            status_code=(status.HTTP_500_INTERNAL_SERVER_ERROR),
-            detail=("На сервере некорректно настроен APP_TIMEZONE."),
-        ) from error
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Устройство передало некорректный часовой пояс.",
+        )
+
+    timezone_label = format_timezone_offset(timezone_offset_minutes)
+    return (
+        fixed_timezone(timedelta(minutes=timezone_offset_minutes)),
+        timezone_label,
+    )
 
 
 def get_month_bounds_utc(
     month_value: str,
     *,
-    timezone: ZoneInfo,
+    timezone: tzinfo,
 ) -> tuple[datetime, datetime]:
     try:
         year_text, month_text = month_value.split("-", maxsplit=1)
@@ -173,7 +214,7 @@ def get_month_bounds_utc(
 def to_local_datetime(
     value: datetime,
     *,
-    timezone: ZoneInfo,
+    timezone: tzinfo,
 ) -> datetime:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
@@ -270,6 +311,15 @@ async def get_content_plan(
     month: str = Query(
         pattern=r"^\d{4}-\d{2}$",
     ),
+    timezone: str | None = Query(
+        default=None,
+        max_length=64,
+    ),
+    timezone_offset_minutes: int | None = Query(
+        default=None,
+        ge=-(14 * 60),
+        le=14 * 60,
+    ),
     telegram_init_data: str = Header(
         alias="X-Telegram-Init-Data",
     ),
@@ -279,10 +329,14 @@ async def get_content_plan(
         telegram_init_data,
         settings=settings,
     )
-    timezone = get_application_timezone(settings)
+    requested_timezone, requested_timezone_name = get_requested_timezone(
+        timezone,
+        timezone_offset_minutes,
+        settings=settings,
+    )
     utc_start, utc_end = get_month_bounds_utc(
         month,
-        timezone=timezone,
+        timezone=requested_timezone,
     )
     owner_telegram_id = int(user["id"])
 
@@ -310,7 +364,7 @@ async def get_content_plan(
 
         scheduled_local = to_local_datetime(
             publication.scheduled_at,
-            timezone=timezone,
+            timezone=requested_timezone,
         )
         channel = channels.get(publication.channel_id)
 
@@ -337,7 +391,7 @@ async def get_content_plan(
 
     return {
         "month": month,
-        "timezone": (settings.app_timezone.strip()),
+        "timezone": requested_timezone_name,
         "items": items,
     }
 
@@ -345,6 +399,15 @@ async def get_content_plan(
 @app.get("/api/publications/{publication_id}")
 async def get_publication_details(
     publication_id: int,
+    timezone: str | None = Query(
+        default=None,
+        max_length=64,
+    ),
+    timezone_offset_minutes: int | None = Query(
+        default=None,
+        ge=-(14 * 60),
+        le=14 * 60,
+    ),
     telegram_init_data: str = Header(
         alias="X-Telegram-Init-Data",
     ),
@@ -354,7 +417,11 @@ async def get_publication_details(
         telegram_init_data,
         settings=settings,
     )
-    timezone = get_application_timezone(settings)
+    requested_timezone, requested_timezone_name = get_requested_timezone(
+        timezone,
+        timezone_offset_minutes,
+        settings=settings,
+    )
     owner_telegram_id = int(user["id"])
 
     async with SessionFactory() as session:
@@ -388,7 +455,7 @@ async def get_publication_details(
 
     scheduled_local = to_local_datetime(
         publication.scheduled_at,
-        timezone=timezone,
+        timezone=requested_timezone,
     )
 
     return {
@@ -410,7 +477,7 @@ async def get_publication_details(
         ),
         "text": publication.text or "",
         "scheduled_local": (scheduled_local.strftime("%Y-%m-%dT%H:%M")),
-        "timezone": (settings.app_timezone.strip()),
+        "timezone": requested_timezone_name,
         "has_media": bool(
             publication.telegram_file_id
             and publication.content_type in MEDIA_CONTENT_TYPES
@@ -472,8 +539,8 @@ async def update_publication(
             )
             scheduled_at_utc = parse_scheduled_local(
                 payload.scheduled_local,
-                timezone_name=(payload.timezone),
-                configured_timezone_name=(settings.app_timezone),
+                timezone_name=payload.timezone,
+                timezone_offset_minutes=(payload.timezone_offset_minutes),
             )
         except ContentPlanEditorValidationError as error:
             raise HTTPException(
